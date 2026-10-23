@@ -113,3 +113,5 @@ node scripts/pages-headers.mjs --api-origin https://api.example.test --public-si
 이 앱의 자체 코드와 문서는 [MIT License](LICENSE)로 제공합니다. 외부 엔진·라이브러리·폰트는 각 원저작자의 라이선스가 적용됩니다. [제3자 고지](THIRD_PARTY_NOTICES.md)를 함께 확인하세요.
 
 rhwp는 독립적으로 운영되는 서비스이며 Slack 또는 한글과컴퓨터의 공식 제품이 아닙니다. 화면·영상에 포함된 외부 제품의 상표·로고·문서는 앱 코드의 MIT 허용 범위와 구분됩니다.
+
+Studio 초기화 스크립트는 고정 소스 목록에 포함하며 빌드 시 내용과 동기 실행 순서를 검사합니다. Pages export는 버전 경로의 `studio/locale-init.js`와 같은 내용을 `/locale-init.js`에도 출력해 이전 HTML 참조를 유지합니다. 루트 호환 파일은 `no-cache`, 버전 파일은 immutable 정책을 사용합니다.

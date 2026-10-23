@@ -23,7 +23,7 @@ if (!existsSync(stamp) || readFileSync(stamp,'utf8') !== lockHash) {
 const publicDir = resolve(cache, 'studio-public');
 rmSync(publicDir, {recursive:true,force:true});
 mkdirSync(publicDir, {recursive:true});
-for (const name of ['fonts','icons','images','favicon.ico','theme-init.js']) {
+for (const name of ['fonts','icons','images','favicon.ico','theme-init.js','locale-init.js']) {
   cpSync(resolve(studio, 'public', name), resolve(publicDir, name), {recursive:true, dereference:true});
 }
 cpSync(resolve(source,'LICENSE'), resolve(publicDir,'LICENSE'));

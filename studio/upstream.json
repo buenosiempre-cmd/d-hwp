@@ -2,7 +2,7 @@
   "version": "0.8.7",
   "repository": "https://github.com/edwardkim/rhwp.git",
   "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
-  "archiveSha256": "59fb2614c33ba88882b65e3a381ce016509c69d7cac23a6fbd1adace5e2a4545",
+  "archiveSha256": "75e7c505045b171f4e90bb28959dd1c5be35baa17deac0a9133fd395e32ee055",
   "paths": [
     "rhwp-studio",
     "assets/fonts",
