@@ -85,6 +85,25 @@ npm run build
 
 `prepare:studio`는 archive가 없으면 Python 도구로 고정 source만 내려받고 각 파일과 최종 archive hash를 검사합니다. 기존 입력의 hash가 다르면 실패하며 원본 엔진 저장소를 clone/fetch하지 않습니다. 이 준비 단계에는 upstream HTTPS 접근이 필요합니다. Studio 내부 의존성은 archive의 lockfile로 설치하며 라이선스는 [제3자 고지](THIRD_PARTY_NOTICES.md)를 따릅니다. 기존 개발 문서의 0.8.6·자동 source fetch 설명보다 이 버전의 `package-lock.json`과 `studio/upstream.json`을 우선합니다.
 
+## Pages 정적 출력
+
+빌드 뒤 API의 정확한 HTTPS origin을 지정하면 `dist/pages`에 정적 배포 입력을 만듭니다. `--public-site`를 추가하면 홈페이지·사용 안내·개인정보 안내와 라이선스 페이지도 포함합니다. 출력 위치는 `dist/pages`로 고정되며, 실행할 때 이 디렉터리를 새로 생성합니다.
+
+```sh
+node scripts/export-pages.mjs https://api.example.test
+node scripts/export-pages.mjs https://api.example.test --public-site
+```
+
+`_headers`는 공통 생성기를 사용합니다. `/static/*`의 프로그램 자산은 1년 immutable 캐시를 적용하고, editor는 재검증(`no-cache`), API 경로와 404는 저장 금지(`no-store`)로 설정합니다. CSP의 API origin과 공개 사이트의 media 허용도 함께 생성합니다.
+
+이미 열린 편집기의 이전 자산을 유지하려면 검증된 과거 `/static/<namespace>/` 프로그램 파일을 새 배포 입력에 함께 보존해야 합니다. 공통 `/static/*` 규칙은 여러 namespace에 적용되므로 파일 수에 따라 헤더 규칙이 늘어나지 않습니다. exporter는 현재 build manifest의 자산만 복사하며 과거 배포를 자동으로 수집하지 않습니다. 과거 파일을 합칠 때는 경로·내용 hash와 라이선스를 확인하고, 환경 파일·인증 정보·사용자 문서를 포함하지 않습니다.
+
+헤더만 별도로 생성할 수도 있습니다. 이 명령은 파일을 수정하지 않고 stdout에 출력합니다.
+
+```sh
+node scripts/pages-headers.mjs --api-origin https://api.example.test --public-site
+```
+
 ## 기여와 커뮤니티
 
 오류 제보·문서 개선·코드 기여는 [기여 안내](CONTRIBUTING.md)를 참고하세요. 참여 시 [행동 강령](CODE_OF_CONDUCT.md)을 지켜 주세요. 보안 취약점은 공개 이슈 대신 [보안 정책](SECURITY.md)의 비공개 경로로 알려 주세요.
