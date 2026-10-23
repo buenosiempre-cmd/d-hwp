@@ -7,8 +7,11 @@ import {State} from '../../src/server/state';
 import {SqliteMetadata} from '../../src/server/cloud/sqlite-metadata';
 import {encodeMetadata} from '../../src/server/cloud/metadata';
 import {SharedSessions} from '../../src/server/cloud/sessions';
-import {DurableTasks,TaskBusy,LeaseLost,GoogleTaskPublisher} from '../../src/server/cloud/tasks';
+import {DurableTasks,TaskBusy,LeaseLost,GoogleTaskPublisher,TerminalNoticeFailure} from '../../src/server/cloud/tasks';
 import type {CloudTasksClient} from '@google-cloud/tasks';
+import type {MetadataStore} from '../../src/server/cloud/metadata';
+import {HttpSlackApi} from '../../src/server/slack-api';
+import {traceTask} from '../../src/server/cloud/telemetry';
 import {actor} from './support';
 function fixture(){
   const dir=mkdtempSync(join(tmpdir(),'rhwp-cloud-test-'));const path=join(dir,'state.sqlite');
@@ -120,7 +123,7 @@ test('worker refuses unauthorized dispatch and acknowledges only after durable c
 test('conversion retries are finite; a redelivery repairs the final receipt without converting again',async()=>{
  const f=fixture();try{
   const tasks=new DurableTasks(f.a,{async publish(){}},f.now),id=await tasks.enqueue('bounded',{teamId:'TTEST',cardId:'card',kind:'preview'});let calls=0,notices=0;
-  const run=async(_spec:any,ctx:any)=>{if(ctx.terminalFailure){notices++;return;}calls++;assert.equal(ctx.finalAttempt,calls===3);throw Object.assign(new Error('secret document'),{code:'conversion_timeout'});};
+  const run=async(_spec:any,ctx:any)=>{if(ctx.terminalNotice){if(ctx.terminalNotice.phase==='bookkeeping')ctx.terminalNotice.result='ready';else{notices++;ctx.terminalNotice.result='sent';}return;}calls++;assert.equal(ctx.finalAttempt,calls===3);throw Object.assign(new Error('secret document'),{code:'conversion_timeout'});};
   await assert.rejects(tasks.execute(id,run));await assert.rejects(tasks.execute(id,run));await tasks.execute(id,run);
   assert.equal((await f.a.get<any>('tasks',id)).state,'failed');await tasks.execute(id,run);
   assert.equal(calls,3);assert.equal(notices,1);assert.doesNotMatch(JSON.stringify(await f.a.list('tasks')),/secret document/);
@@ -135,7 +138,7 @@ test('a durable deadline reconciles a killed last worker and fences stale checkp
   const gate=new Promise<void>(r=>release=r),started=new Promise<void>(r=>entered=r);
   const active=tasks.execute(id,async(_s,ctx)=>{checkpoint=ctx.checkpoint;entered();await gate;await checkpoint();});await started;
   f.advance(15*60_000);let terminal=false;
-  await tasks.execute(watch.id,async(_s,ctx)=>{terminal=!!ctx.terminalFailure;assert.equal(ctx.id,id);});
+  await tasks.execute(watch.id,async(_s,ctx)=>{terminal=!!ctx.terminalFailure;assert.equal(ctx.id,id);if(ctx.terminalNotice)ctx.terminalNotice.result=ctx.terminalNotice.phase==='bookkeeping'?'ready':'sent';});
   assert.equal(terminal,true);assert.equal((await f.a.get<any>('tasks',id)).state,'failed');release();await assert.rejects(active,LeaseLost);
  }finally{f.close();}
 });
@@ -145,13 +148,86 @@ test('permanent conversion fails once; redelivery and failed notifications never
   const published:{id:string;at?:number}[]=[],tasks=new DurableTasks(f.a,{async publish(id,at){published.push({id,at});}},f.now);
   const id=await tasks.enqueue('permanent',{teamId:'TTEST',cardId:'card',kind:'preview'});let conversions=0,notices=0;
   const run=async(_s:any,ctx:any)=>{
-   if(ctx.terminalFailure){assert.equal(ctx.terminalFailure,'conversion_svg_limit');notices++;if(notices===1)throw new Error('notification unavailable');return;}
+   if(ctx.terminalNotice){assert.equal(ctx.terminalFailure,'conversion_svg_limit');if(ctx.terminalNotice.phase==='bookkeeping'){ctx.terminalNotice.result='ready';return;}notices++;if(notices===1)throw new TerminalNoticeFailure(new Error('notification unavailable'));ctx.terminalNotice.result='sent';return;}
    conversions++;throw Object.assign(new Error('private text'),{code:'conversion_svg_limit'});
   };
-  await tasks.execute(id,run);assert.equal((await f.a.get<any>('tasks',id)).state,'failed');
+  await assert.rejects(tasks.execute(id,run));assert.equal((await f.a.get<any>('tasks',id)).state,'failed');
   await tasks.execute(id,run);await tasks.execute(id,run);
   f.advance(15*60_000);await tasks.execute(published.find(p=>p.at!==undefined)!.id,run);
-  assert.equal(conversions,1);assert.equal(notices,3);
+  assert.equal(conversions,1);assert.equal(notices,2);
   const receipt=await f.a.get<any>('tasks',id);assert.equal(receipt.state,'failed');assert.equal(receipt.failureCode,'conversion_svg_limit');
  }finally{f.close();}
+});
+
+test('terminal failure appears only after committed final attempt and is distinct from callback traces',async()=>{
+ const f=fixture();try{
+  const terminal:Record<string,unknown>[]=[],traces:Record<string,unknown>[]=[],receipts:Promise<unknown>[]=[];
+  const tasks=new DurableTasks(f.a,{async publish(){}},f.now,60_000,row=>{terminal.push(row);receipts.push(f.a.get('tasks',String(row.taskId)));});
+  const spec={teamId:'TTEST',cardId:'private-card',kind:'event' as const},id=await tasks.enqueue('terminal-event',spec);
+  const api=new HttpSlackApi('xoxb-secret',async()=>new Response(JSON.stringify({ok:false,error:'file_not_found'})));
+  const run=async(s:any,ctx:any)=>{if(ctx.terminalFailure)return;await traceTask(s,ctx,()=>api.call('files.info',{file:'FPRIVATE'}),r=>traces.push(r));};
+  await assert.rejects(tasks.execute(id,run));assert.equal(terminal.length,0);
+  await assert.rejects(tasks.execute(id,run));assert.equal(terminal.length,0);
+  await tasks.execute(id,run);assert.equal(terminal.length,1);
+  assert.equal(terminal[0]?.taskId,id);assert.equal(terminal[0]?.attempt,3);assert.equal(terminal[0]?.slackError,'file_not_found');
+  assert.equal((await receipts[0] as {state:string}).state,'failed');assert.equal(traces.filter(r=>r.event==='task_finished').length,3);
+  await tasks.execute(id,run);assert.equal(terminal.length,1);assert.equal((await f.a.get<any>('tasks',id)).generation,3);
+  assert.equal(new Set(terminal.map(r=>r.taskId)).size,1);
+  for(const value of ['xoxb-secret','FPRIVATE','private-card','TTEST'])assert.equal(JSON.stringify(terminal).includes(value),false);
+ }finally{f.close();}
+});
+test('failed persistence cannot emit a terminal receipt',async()=>{
+ const f=fixture();try{
+  const rows:Record<string,unknown>[]=[],normal=new DurableTasks(f.a,{async publish(){}},f.now),id=await normal.enqueue('persistence',{teamId:'TTEST',cardId:'card',kind:'event'});
+  const rejecting={get:f.a.get.bind(f.a),list:f.a.list.bind(f.a),atomic:async(kind:string,key:string,change:any)=>f.a.atomic(kind,key,current=>{
+   const result=change(current);if(result.value?.state==='failed')throw new Error('storage unavailable');return result;
+  })} as MetadataStore;
+  const tasks=new DurableTasks(rejecting,{async publish(){}},f.now,60_000,r=>rows.push(r));
+  await assert.rejects(tasks.execute(id,async()=>{throw Object.assign(new Error('permanent'),{code:'conversion_svg_limit'});}));
+  assert.equal(rows.length,0);assert.equal((await f.a.get<any>('tasks',id)).state,'running');
+ }finally{f.close();}
+});
+test('watchdog failure remains observable even when its notification fails',async()=>{
+ const f=fixture();try{
+  const rows:Record<string,unknown>[]=[],scheduled:{id:string;at?:number}[]=[],tasks=new DurableTasks(f.a,{async publish(id,at){scheduled.push({id,at});}},f.now,60_000,r=>rows.push(r));
+  const id=await tasks.enqueue('deadline-observation',{teamId:'TTEST',cardId:'card',kind:'preview'}),watch=scheduled.find(r=>r.at!==undefined)!;
+  f.advance(15*60_000);
+  await assert.rejects(tasks.execute(watch.id,async()=>{throw new Error('notification unavailable');}));
+  assert.equal(rows.length,1);assert.equal(rows[0]?.taskId,id);assert.equal(rows[0]?.errorCode,'task_deadline');assert.equal(rows[0]?.attempt,0);
+  assert.equal((await f.a.get<any>('tasks',id)).state,'failed');assert.equal((await f.a.get<any>('tasks',watch.id)).state,'queued');
+ }finally{f.close();}
+});
+test('lost ownership and successful work cannot emit terminal failure',async()=>{
+ const f=fixture();try{
+  const rows:Record<string,unknown>[]=[],publisher={async publish(){}},first=new DurableTasks(f.a,publisher,f.now,60_000,r=>rows.push(r)),second=new DurableTasks(f.b,publisher,f.now,60_000,r=>rows.push(r));
+  const id=await first.enqueue('lease-observation',{teamId:'TTEST',cardId:'card',kind:'event'});
+  let release!:()=>void,entered!:()=>void;const gate=new Promise<void>(r=>release=r),started=new Promise<void>(r=>entered=r);
+  const old=first.execute(id,async(_s,ctx)=>{entered();await gate;await ctx.checkpoint();});await started;
+  f.advance(60_001);await second.execute(id,async()=>{});release();await assert.rejects(old,LeaseLost);
+  assert.equal(rows.length,0);assert.equal((await f.a.get<any>('tasks',id)).state,'done');
+ }finally{f.close();}
+});
+test('terminal logger failure never changes durable completion or failure behavior',async()=>{
+ const f=fixture();try{
+  const tasks=new DurableTasks(f.a,{async publish(){}},f.now,60_000,()=>{throw new Error('sink offline');});
+  const id=await tasks.enqueue('sink-failure',{teamId:'TTEST',cardId:'card',kind:'event'});
+  await tasks.execute(id,async()=>{throw Object.assign(new Error('permanent'),{code:'conversion_svg_limit'});});
+  assert.equal((await f.a.get<any>('tasks',id)).state,'failed');
+ }finally{f.close();}
+});
+
+test('worker keeps 503 retries and terminal 204 distinct from logical Slack failure',async()=>{
+ const {workerServer}=await import('../../src/server/cloud/worker');const f=fixture();
+ const rows:Record<string,unknown>[]=[],tasks=new DurableTasks(f.a,{async publish(){}},f.now,60_000,r=>rows.push(r));
+ const id=await tasks.enqueue('http-terminal',{teamId:'TTEST',cardId:'card',kind:'event'});
+ const api=new HttpSlackApi('xoxb-secret',async()=>new Response(JSON.stringify({ok:false,error:'file_not_found'})));
+ const server=workerServer(tasks,async()=>{await api.call('files.info',{file:'FPRIVATE'});},{audience:'https://worker.run.app',serviceAccount:'worker@example.iam.gserviceaccount.com',verify:async token=>token==='valid'});
+ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address();if(!address||typeof address==='string')throw new Error('listen');
+ const send=()=>fetch(`http://127.0.0.1:${address.port}/internal/tasks`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer valid'},body:JSON.stringify({id})});
+ try{
+  assert.equal((await send()).status,503);assert.equal(rows.length,0);
+  assert.equal((await send()).status,503);assert.equal(rows.length,0);
+  assert.equal((await send()).status,204);assert.equal(rows.length,1);assert.equal(rows[0]?.slackError,'file_not_found');assert.equal(rows[0]?.httpStatus,200);
+  assert.equal((await f.a.get<any>('tasks',id)).state,'failed');
+ }finally{await new Promise<void>(r=>server.close(()=>r()));f.close();}
 });

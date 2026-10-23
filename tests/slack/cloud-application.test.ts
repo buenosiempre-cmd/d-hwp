@@ -13,7 +13,7 @@ import {actor,config,bytes} from './support';
 function fixture(concurrency:1|2=1,editorMode:'embed'|'browser'='embed'){
  const dir=mkdtempSync(join(tmpdir(),'rhwp-cloud-app-')),state=new State(join(dir,'metadata.sqlite'),'TTEST'),store=new SqliteMetadata(state),api=new EditorApi();
  const pending:string[]=[];let failPublish=false,failUpload=false;const tasks=new DurableTasks(store,{async publish(id,notBefore){if(failPublish)throw new Error('queue unavailable');if(notBefore===undefined)pending.push(id);}});
- const make=(options:NonNullable<ConstructorParameters<typeof CloudApplication>[4]>={})=>new CloudApplication({...config,editorMode,imageUploadConcurrency:concurrency,publicOrigin:'https://cloud.example.com'},api,store,tasks,{download:async()=>bytes,fetcher:async(url)=>{assert.ok(String(url).startsWith('https://files.slack.com/upload/v1/'));if(failUpload)throw new Error('upload down');return new Response('ok');},convert:async()=>({pdf:Buffer.from('%PDF-synthetic'),pageCount:12,pages:[1,2,3].map(page=>({page,png:Buffer.from('png')}))}),images:async()=>({pageCount:12,pages:Array.from({length:10},(_,i)=>({page:i+1,png:Buffer.from('png')}))}),...options});
+ const make=(options:NonNullable<ConstructorParameters<typeof CloudApplication>[4]>={})=>new CloudApplication({...config,editorMode,imageUploadConcurrency:concurrency,publicOrigin:'https://cloud.example.com'},api,store,tasks,{noticeIdentity:{generation:'fixture-generation',botUserId:'UBOT',check:async()=>{}},download:async()=>bytes,fetcher:async(url)=>{assert.ok(String(url).startsWith('https://files.slack.com/upload/v1/'));if(failUpload)throw new Error('upload down');return new Response('ok');},convert:async()=>({pdf:Buffer.from('%PDF-synthetic'),pageCount:12,pages:[1,2,3].map(page=>({page,png:Buffer.from('png')}))}),images:async()=>({pageCount:12,pages:Array.from({length:10},(_,i)=>({page:i+1,png:Buffer.from('png')}))}),...options});
  return {store,api,tasks,make,pending,setPublishFailure(v:boolean){failPublish=v;},setUploadFailure(v:boolean){failUpload=v;},async drain(){while(pending.length){const id=pending.shift()!;await tasks.execute(id,(spec,ctx)=>make().execute(spec,ctx));}},close(){state.close();rmSync(dir,{recursive:true,force:true});}};
 }
 test('replacement workers build one thread card and persist file IDs without document bytes or upload URLs',async()=>{
@@ -212,6 +212,9 @@ test('browser beta shares PDF before ready and saved HWP in the same thread with
   const saved=await app.save(session,request,'hwp',bytes);assert.equal(saved.saved,true);await f.drain();
   const revisions=(await f.store.list<any>('cards')).map(([,c])=>c).filter(c=>c.parentId===id);assert.equal(revisions.length,1);assert.equal(revisions[0].pdf,'ready');
   const revision=f.api.messages.get(revisions[0].messageTs)!;assert.equal(revision.thread_ts,'100.001');assert.equal(revision.metadata,undefined);
+  assert.deepEqual(revisions[0].noticeTarget,{fileId:saved.fileId,cardId:revisions[0].id,teamId:actor.teamId,channelId:actor.channelId,messageTs:revisions[0].messageTs,generation:'fixture-generation',botUserId:'UBOT'});
+  assert.notEqual(revisions[0].noticeTarget.cardId,card.noticeTarget?.cardId);assert.notEqual(revisions[0].noticeTarget.fileId,card.noticeTarget?.fileId);assert.notEqual(revisions[0].noticeTarget.messageTs,card.noticeTarget?.messageTs);
+
   assert.ok((revision.files as {id:string}[]).some(v=>v.id===saved.fileId));assert.ok(f.api.calls.some(c=>c.method==='chat.update'&&c.args.ts===revisions[0].messageTs&&(c.args.file_ids as string[])?.includes(saved.fileId!)));assert.equal(f.api.calls.filter(c=>c.method==='chat.postMessage').length,2);
  }finally{f.close();}
 });
@@ -230,7 +233,7 @@ test('leaving during preview finalizes state without resharing files and permits
   assert.equal(card.pdf,'failed');assert.equal(card.imageState,'failed');assert.equal(card.recovery.state,'failed');
   assert.equal((await f.store.get<any>('tasks',job)).state,'failed');
   const updates=f.api.calls.filter(c=>c.method==='chat.update');assert.ok(updates.length);
-  const last=updates.at(-1)!.args;assert.match(JSON.stringify(last),/권한 변경/);
+  const last=updates.at(-1)!.args;assert.match(JSON.stringify(last),/문서 접근을 확인할 수 없어/);
   for(const key of ['file_ids','metadata'])assert.equal(last[key],undefined);
   assert.equal(JSON.stringify(last).includes('FTEST'),false);assert.equal(JSON.stringify(last).includes('https://'),false);
   assert.equal(f.api.calls.filter(c=>c.method==='files.completeUploadExternal').length,0);
@@ -312,8 +315,26 @@ test('permanent SVG limit finalizes the card on attempt one and offers actionabl
   const message=JSON.stringify(f.api.messages.get(card.messageTs!));assert.match(message,/문서를 나누거나/);assert.doesNotMatch(message,/자동으로 다시 시도|준비가 지연|private contents|rhwp_retry_preview/);assert.match(message,/rhwp_browser_edit/);
   await f.tasks.execute(job,(s,c)=>app.execute(s,c));assert.equal(conversions,1);
   // A ready PDF is retained when only image generation reaches a permanent limit.
-  await f.store.atomic<any,void>('cards',id,current=>({value:{...current,pdf:'ready',pdfUrl:'https://example.com/ready.pdf'},result:undefined}));
-  await f.tasks.execute(job,(s,c)=>app.execute(s,c));card=await app.authorize(id,actor);assert.equal(card.pdf,'ready');
+  await f.store.atomic<any,void>('cards',id,current=>({value:{...current,pdf:'ready',pdfUrl:'https://example.com/ready.pdf',pageCount:12},result:undefined}));
+  const images=f.make({images:async()=>{throw Object.assign(new Error('synthetic image limit'),{code:'conversion_preview_limit'});}});
+  await images.morePages(id,actor,card.messageTs!,'fresh-image-generation');
+  await f.tasks.execute(f.pending.shift()!,(s,c)=>images.execute(s,c));card=await app.authorize(id,actor);assert.equal(card.pdf,'ready');
   assert.match(JSON.stringify(f.api.messages.get(card.messageTs!)),/PDF로 보기/);
+ }finally{f.close();}
+});
+test('PDF evidence survives failed Slack publication and a replacement worker confirms publication',async()=>{
+ const f=fixture(1,'browser');try{
+  const app=()=>f.make();
+  const id=await app().submit({...actor,threadTs:'100.001'},'FTEST','thread:usage-resume');
+  await f.tasks.execute(f.pending.shift()!,(s,c)=>app().execute(s,c));const job=f.pending.shift()!;
+  let blocked=true;f.api.handler=async(method,args)=>{
+   if(blocked&&method==='chat.update'&&Array.isArray(args.file_ids)&&args.file_ids.length>0)throw new Error('synthetic Slack update outage');
+   return f.api.response(method,args);
+  };
+  await assert.rejects(f.tasks.execute(job,(s,c)=>app().execute(s,c)));
+  const partial=await f.store.get<any>('cards',id);assert.ok(partial.pdfPreparedAt);assert.equal(partial.slackPublishedAt,undefined);
+  blocked=false;await f.tasks.execute(job,(s,c)=>app().execute(s,c));
+  const done=await f.store.get<any>('cards',id);assert.ok(done.slackPublishedAt>=done.pdfPreparedAt);
+  assert.equal(f.api.calls.filter(c=>c.method==='files.getUploadURLExternal'&&String(c.args.filename).endsWith('.pdf')).length,1);
  }finally{f.close();}
 });

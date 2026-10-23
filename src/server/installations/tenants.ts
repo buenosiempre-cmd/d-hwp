@@ -5,7 +5,7 @@ import {HttpSlackApi} from '../slack-api';
 import type {MetadataStore,Change} from '../cloud/metadata';
 import {DurableTasks,type TaskPublisher,type TaskSpec,type TaskContext} from '../cloud/tasks';
 import {CloudApplication} from '../cloud/application';
-import {traceTask} from '../cloud/telemetry';
+import {traceTask,bindLogicalTask} from '../cloud/telemetry';
 import {CloudEvents} from '../cloud/events';
 import {Installations,type Installation} from './store';
 
@@ -18,6 +18,7 @@ export interface TenantOptions {
   store:(installation:Installation)=>MetadataStore;
   api?:(credential:string)=>SlackApi;
   application?:ConstructorParameters<typeof CloudApplication>[4];
+
 }
 /** No tenant or permission cache. Every resolution and side effect checks the current installation generation. */
 export class Tenants {
@@ -41,19 +42,23 @@ export class Tenants {
       });await o.publisher.publish(id,notBefore);
     }};
     const config:Config={...o.config,editorMode:'browser',teamId,botToken,workspaceHost:installation.workspaceHost,channelIds:new Set(),adminIds:new Set([installation.installerUserId])};
-    const tasks=new DurableTasks(store,publisher),documents=new CloudApplication(config,api,store,tasks,o.application),identity={botId:installation.botId,botUserId:installation.botUserId};
+    const tasks=new DurableTasks(store,publisher),documents=new CloudApplication(config,api,store,tasks,{...o.application,noticeIdentity:{generation:installation.generation,botUserId:installation.botUserId,check}}),identity={botId:installation.botId,botUserId:installation.botUserId};
     return {installation,config,documents,tasks,identity,events:new CloudEvents(documents,identity.botUserId)};
   }
   /** Called only after worker OIDC verification. Revoked deliveries are acknowledged without side effects. */
   async execute(id:string,_unused?:(spec:TaskSpec,context:TaskContext)=>Promise<void>):Promise<void>{
     if(!/^[a-f0-9]{64}$/.test(id))throw new Error('Invalid task ID');
     const route=await this.options.registry.get<Delivery>('deliveries',id);
-    if(!route||route.appId!==this.options.config.appId||physicalId(route)!==id)throw new Error('Unknown delivery');
-    if(!await this.options.installations.active(route.teamId,route.generation))return;
+    if(!route||! /^[a-f0-9]{64}$/.test(route.logicalId)||route.appId!==this.options.config.appId||physicalId(route)!==id)throw new Error('Unknown delivery');
+    bindLogicalTask(route.logicalId);
+    if(!await this.options.installations.active(route.teamId,route.generation)){
+      try{console.log(JSON.stringify({event:'tenant_delivery_skipped',taskId:route.logicalId,at:Date.now(),reason:'installation_mismatch'}));}catch{}
+      return;
+    }
     const tenant=await this.resolve(route.teamId,route.generation);
     await tenant.tasks.execute(route.logicalId,(spec,context)=>{
       if(spec.teamId!==route.teamId)throw new Error('Task tenant mismatch');
       return traceTask(spec,context,()=>spec.kind==='event'?tenant.events.execute(spec,context):tenant.documents.execute(spec,context));
-    });
+    },(spec,context)=>tenant.events.terminal(spec,context));
   }
 }

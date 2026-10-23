@@ -7,7 +7,10 @@ import {State} from '../../src/server/state';
 import {SqliteMetadata} from '../../src/server/cloud/sqlite-metadata';
 import {Installations,type InstallationInput} from '../../src/server/installations/store';
 import {Tenants} from '../../src/server/installations/tenants';
+import {UserError} from '../../src/server/errors';
+import {attachSlackDiagnostics} from '../../src/server/slack-diagnostics';
 import {distributedReceiver} from '../../src/server/installations/receiver';
+import {traceDelivery,bindDelivery,deliveryFailure} from '../../src/server/cloud/telemetry';
 import {config,signed,command,FakeApi} from '../slack/support';
 const input:InstallationInput={appId:'ATEST',teamId:'TONE',installerUserId:'UTEST',botId:'BBOT',botUserId:'UBOT',workspaceHost:'one.slack.com',scopes:['commands'],botToken:'xoxb-synthetic-one'};
 async function fixture(){
@@ -18,7 +21,7 @@ async function fixture(){
     const id=install.teamId+'-'+install.generation;let s=stores.get(id);if(!s){s=create(id);stores.set(id,s);}return s;
   },api:token=>{let api=apis.get(token);if(!api){api=new FakeApi();apis.set(token,api);}return api;}});
   const a=await vault.activate(input),b=await vault.activate({...input,teamId:'TTWO',workspaceHost:'two.slack.com',botToken:'xoxb-synthetic-two'});
-  return {registry,vault,tenants,apis,published,a,b,close(){for(const s of states)s.close();rmSync(dir,{recursive:true,force:true});}};
+  return {registry,vault,tenants,apis,published,a,b,stores,close(){for(const s of states)s.close();rmSync(dir,{recursive:true,force:true});}};
 }
 test('same record keys stay isolated and selected tenant uses only its own token',async()=>{
   const f=await fixture();try{
@@ -52,6 +55,19 @@ test('delivery registry cannot redirect a physical id to another workspace',asyn
     await assert.rejects(f.tenants.execute(id),/Unknown delivery/);
   }finally{f.close();}
 });
+test('validated delivery routing keeps logical identity when tenant resolution fails before task tracing',async()=>{
+ const f=await fixture(),rows:Record<string,unknown>[]=[];try{
+  const a=await f.tenants.resolve('TONE');const logical=await a.tasks.enqueue('route-failure',{teamId:'TONE',cardId:'private-card',kind:'event'});
+  const physical=f.published.at(-1)!;f.tenants.resolve=async()=>{throw new Error('private tenant failure');};
+  await traceDelivery(undefined,async()=>{
+   bindDelivery(physical);try{await f.tenants.execute(physical);}catch(error){deliveryFailure(error);}
+  },()=>503,r=>rows.push(r));
+  assert.equal(rows.at(-1)?.deliveryId,physical);assert.equal(rows.at(-1)?.taskId,logical);
+  assert.equal(rows.at(-1)?.attempt,undefined);assert.equal(rows.at(-1)?.statusCode,503);
+  assert.equal(rows.some(r=>r.event==='task_finished'),false);
+  assert.equal(JSON.stringify(rows).includes('private tenant failure'),false);
+ }finally{f.close();}
+});
 test('Slack signature is verified before installation lookup; cross-app and conflicting team envelopes are ignored',async()=>{
   const f=await fixture();let lookups=0;const resolve=f.tenants.resolve.bind(f.tenants);f.tenants.resolve=async(...args)=>{lookups++;return resolve(...args);};
   const runtime=distributedReceiver({appId:'ATEST',signingSecret:config.signingSecret,tenants:f.tenants}),server=await runtime.receiver.start({host:'127.0.0.1',port:0}),address=server.address();assert.ok(address&&typeof address!=='string');const origin=`http://127.0.0.1:${address.port}`;
@@ -72,5 +88,39 @@ test('active tenant deliveries enter the redacted task trace',async()=>{
   await assert.rejects(f.tenants.execute(f.published.at(-1)!));
   assert.ok(rows.some(r=>r.event==='task_started'));assert.ok(rows.some(r=>r.event==='task_finished'&&r.ok===false));
   const text=JSON.stringify(rows);for(const secret of ['TONE','xoxb-','missing-private-card'])assert.equal(text.includes(secret),false);
+ }finally{log.mock.restore();f.close();}
+});
+
+test('tenant final event callbacks preserve workspace access and run once after durable failure',async()=>{
+ const f=await fixture(),rows:Record<string,unknown>[]=[];const log=mock.method(console,'log',(line:string)=>rows.push(JSON.parse(line)));
+ try{
+  const a=await f.tenants.resolve('TONE');await a.documents.store.atomic('channels','CTEST',()=>({value:{mode:'mention'},result:undefined}));
+  const api=f.apis.get('xoxb-synthetic-one')!;
+  api.handler=async(method,args)=>{
+   if(method==='files.info')throw attachSlackDiagnostics(new UserError('slack_rejected','private error'),200,'missing_scope');
+   const response=api.response(method,args);if(method==='conversations.info')return {...response,channel:{...(response.channel as object),context_team_id:'TONE',shared_team_ids:['TONE']}};return response;
+  };
+  await a.events.enqueue('EFAIL',{kind:'app_mention',actor:{teamId:'TONE',userId:'UTEST',channelId:'CTEST'},files:['FTEST']});const id=f.published.at(-1)!;
+  await f.tenants.execute(id);await f.tenants.execute(id);
+  assert.equal(api.calls.filter(c=>c.method==='files.info').length,1);assert.equal(api.calls.filter(c=>c.method==='chat.postEphemeral').length,1);
+  assert.equal(f.apis.get('xoxb-synthetic-two')?.calls.length??0,0);
+  assert.equal(rows.some(r=>r.event==='task_terminal_failed'&&r.slackError==='missing_scope'),true);
+  for(const value of ['TONE','UTEST','FTEST','xoxb-','private error'])assert.equal(JSON.stringify(rows).includes(value),false);
+ }finally{log.mock.restore();f.close();}
+});
+test('revocation during terminal notice permission checks prevents sending and preserves failed receipt',async()=>{
+ const f=await fixture(),log=mock.method(console,'log',()=>{});try{
+  const a=await f.tenants.resolve('TONE');await a.documents.store.atomic('channels','CTEST',()=>({value:{mode:'mention'},result:undefined}));
+  const api=f.apis.get('xoxb-synthetic-one')!;let failed=false;
+  api.handler=async(method,args)=>{
+   if(method==='files.info'){failed=true;throw attachSlackDiagnostics(new UserError('slack_rejected','private error'),200,'missing_scope');}
+   const response=api.response(method,args);
+   if(failed&&method==='conversations.members')await f.vault.revoke('TONE',f.a.generation);
+   if(method==='conversations.info')return {...response,channel:{...(response.channel as object),context_team_id:'TONE',shared_team_ids:['TONE']}};return response;
+  };
+  await a.events.enqueue('EREVOKE',{kind:'app_mention',actor:{teamId:'TONE',userId:'UTEST',channelId:'CTEST'},files:['FTEST']});const id=f.published.at(-1)!,route=await f.registry.get<any>('deliveries',id);
+  await f.tenants.execute(id);assert.equal(api.calls.filter(c=>c.method==='chat.postEphemeral').length,0);
+  assert.equal((await f.stores.get('TONE-'+f.a.generation)!.get<any>('tasks',route.logicalId)).state,'failed');
+  await f.tenants.execute(id);assert.equal(api.calls.filter(c=>c.method==='files.info').length,1);
  }finally{log.mock.restore();f.close();}
 });

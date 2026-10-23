@@ -67,6 +67,24 @@ rhwp for Slack은 직접 호스팅하여 무료로 제공합니다. 후원은 �
 - [조직 인프라에서 자체 호스팅](docs/self-hosting.md) — Slack 앱·Cloud Run·Pages 구성. 새 조직의 빈 계정에서 재현 검증은 아직 남아 있습니다.
 - [개발 문서](docs/README.md) — 로컬 실행, 구조, 배포와 의존성 안내.
 
+## 소스 빌드 입력
+
+현재 제품 소스는 core/editor/Studio **0.8.7**을 사용합니다. Node **24.21.0**, npm **11.19.0**, Python 3과 `package-lock.json`의 고정 의존성으로 빌드합니다.
+
+Studio 입력은 [고정 upstream commit](https://github.com/edwardkim/rhwp/tree/1a76570e833917d15817415a53c09ad61ab3203f)의 허용된 소스·폰트·라이선스로 만든 `.cache/studio.tar`입니다. `studio/upstream.json`의 SHA-256 `59fb2614c33ba88882b65e3a381ce016509c69d7cac23a6fbd1adace5e2a4545`와 일치해야 합니다. 일반 GitHub 전체 다운로드 tarball이나 `git archive` 출력과는 다른, 경로 정렬·uid/gid/mtime 0·원본 mode의 GNU tar 입력입니다. 원본 문서·샘플 문서·변환 결과는 입력에서 제외합니다.
+
+```sh
+# 고정 source manifest의 허용 입력만 받아 검증합니다.
+python3 scripts/prepare-studio-archive.py
+npm ci --ignore-scripts --no-audit --no-fund
+npm run typecheck
+npm run test:slack
+npm run test:security
+npm run build
+```
+
+`prepare:studio`는 archive가 없으면 Python 도구로 고정 source만 내려받고 각 파일과 최종 archive hash를 검사합니다. 기존 입력의 hash가 다르면 실패하며 원본 엔진 저장소를 clone/fetch하지 않습니다. 이 준비 단계에는 upstream HTTPS 접근이 필요합니다. Studio 내부 의존성은 archive의 lockfile로 설치하며 라이선스는 [제3자 고지](THIRD_PARTY_NOTICES.md)를 따릅니다. 기존 개발 문서의 0.8.6·자동 source fetch 설명보다 이 버전의 `package-lock.json`과 `studio/upstream.json`을 우선합니다.
+
 ## 기여와 커뮤니티
 
 오류 제보·문서 개선·코드 기여는 [기여 안내](CONTRIBUTING.md)를 참고하세요. 참여 시 [행동 강령](CODE_OF_CONDUCT.md)을 지켜 주세요. 보안 취약점은 공개 이슈 대신 [보안 정책](SECURITY.md)의 비공개 경로로 알려 주세요.

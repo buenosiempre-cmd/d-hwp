@@ -7,15 +7,7 @@ const cache = resolve('.cache');
 mkdirSync(cache, {recursive:true});
 const archive = resolve(cache, 'studio.tar');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-if (!existsSync(archive)) {
-  let repo = process.env.RHWP_SOURCE_REPO;
-  if (!repo) {
-    repo = resolve(cache, 'upstream.git');
-    if (!existsSync(repo)) execFileSync('git', ['init', '--bare', repo], {stdio:'inherit'});
-    execFileSync('git', ['-C', repo, 'fetch', '--depth=1', spec.repository, spec.commit], {stdio:'inherit',timeout:300_000});
-  }
-  writeFileSync(archive, execFileSync('git', ['-C', repo, 'archive', spec.commit, ...spec.paths], {maxBuffer:256*1024*1024,timeout:120_000}));
-}
+if (!existsSync(archive)) execFileSync('python3', ['scripts/prepare-studio-archive.py'], {stdio:'inherit',timeout:600_000});
 if (hash(readFileSync(archive)) !== spec.archiveSha256) throw new Error('Studio source archive integrity mismatch');
 const source = resolve(cache, 'studio-source');
 mkdirSync(source, {recursive:true});

@@ -8,11 +8,12 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && rm -rf /var/lib/apt/lists/*
 
 FROM dependencies AS build
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY studio/upstream.json ./studio/upstream.json
 COPY scripts/prepare-studio.mjs ./scripts/prepare-studio.mjs
+COPY .cache/studio.tar ./.cache/studio.tar
 RUN npm run prepare:studio
 COPY src ./src
 COPY studio ./studio

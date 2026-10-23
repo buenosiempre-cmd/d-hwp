@@ -71,6 +71,7 @@ test('document databases are never opened across edit, idle, settings and reload
   await page.evaluate(() => window.__studio.commands.execute('tool:options',{}, {allowDialog:true}));
   const ui=page.frameLocator('#editor iframe');
   await ui.locator('.dialog-tab[data-tab="file"]').click();
+  await expect(ui.locator('.opt-desc').filter({hasText:'Slack에서는 복구본과 자동 저장을 사용하지 않습니다.'})).toBeVisible();
   for (const id of ['opt-recovery-enabled','opt-idle-save-enabled']) {
     await expect(ui.locator('#'+id)).not.toBeChecked(); await expect(ui.locator('#'+id)).toBeDisabled();
   }
@@ -157,7 +158,7 @@ test('size, parser error and 201 page limits fail without acknowledging a save',
   await expect(page.locator('#editor iframe')).toHaveCount(0);
 });
 
-test('known upstream: mixed-format selection undo should preserve formatting and SVG geometry',async ({page}, testInfo)=>{
+test('mixed-format selection undo preserves formatting and SVG geometry',async ({page}, testInfo)=>{
   await ready(page); await load(page);
   const ui=page.frameLocator('#editor iframe');
   const input=ui.getByLabel('문서 편집 입력',{exact:true});
@@ -173,6 +174,5 @@ test('known upstream: mixed-format selection undo should preserve formatting and
   writeFileSync(testInfo.outputPath('after-undo.svg'),after);
   await ui.locator('#scroll-container').evaluate(el=>{el.scrollTop=0;});
   await page.screenshot({path:testInfo.outputPath('after-undo.png')});
-  test.fail(true, 'Studio 0.8.6: mixed-format undo changes prior bold styles and paragraph/table geometry; tracked in Stage 2 report.');
   expect(after===before, 'Undo changed SVG geometry; do not update a baseline to hide this.').toBe(true);
 });
