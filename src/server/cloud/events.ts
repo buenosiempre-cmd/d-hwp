@@ -1,21 +1,47 @@
 import {onboardChannel} from './channel-onboarding';
 import {createHash} from 'node:crypto';
 import type {Actor} from '../access';
-import {authorizeFile} from '../access';
+import {authorizeFile,authorizeChannel} from '../access';
 import {ID} from '../config';
 import {object,UserError,userMessage} from '../errors';
 import type {CloudApplication} from './application';
-import type {TaskContext,TaskSpec} from './tasks';
-import {notificationFailure} from './telemetry';
+import type {TaskContext,TaskSpec,TerminalContext} from './tasks';
+import {notificationFailure,eventNoticeResult,errorCode,eventInputObserved,eventInputNoticeFinished} from './telemetry';
+import {AttachmentPendingError} from './error-diagnostics';
 import {Settings} from '../settings';
 /** A projection of a signed event. Never store the message text or the original payload. */
-export interface Input {kind:'channel_joined'|'file_shared'|'app_mention'|'file_deleted'|'file_unshared'|'home'|'retry_preview'|'more_pages';cardId?:string;messageTs?:string;actor?:Actor;fileId?:string;files?:string[];user?:string;receivedAt?:number;}
+export interface Input {kind:'channel_joined'|'file_shared'|'app_mention'|'file_deleted'|'file_unshared'|'home'|'retry_preview'|'more_pages';cardId?:string;messageTs?:string;actor?:Actor;fileId?:string;files?:string[];user?:string;receivedAt?:number;terminalNoticeRequested?:true;}
 export class CloudEvents {
- constructor(private application:CloudApplication,private botUserId:string){}
+ constructor(private application:CloudApplication,private botUserId:string,private noticeSink?:(record:Record<string,unknown>)=>void){}
  async enqueue(eventId:string,input:Input):Promise<void>{
   const app=this.application,id=createHash('sha256').update(app.config.teamId+':'+eventId).digest('hex');
-  await app.store.atomic<Input,void>('inputs',id,current=>({value:current??{...input,receivedAt:Date.now()},expiresAt:Date.now()+7*86400_000,result:undefined}));
-  await app.tasks.enqueue('event:'+id,{teamId:app.config.teamId,cardId:id,kind:'event'});
+  const saved=await app.store.atomic<Input,Input>('inputs',id,current=>{
+   const value=current??{...input,receivedAt:Date.now(),terminalNoticeRequested:input.kind==='app_mention'?true as const:undefined};
+   return {value,expiresAt:Date.now()+7*86400_000,result:value};
+  });
+  await app.tasks.enqueue('event:'+id,{teamId:app.config.teamId,cardId:id,kind:'event',...(saved.terminalNoticeRequested?{terminalNoticeRequested:true as const}:{})});
+ }
+ async terminal(spec:TaskSpec,context:TerminalContext):Promise<void>{
+  const app=this.application,report=(status:'sent'|'failed'|'skipped'|'duplicate',error?:unknown)=>eventNoticeResult(context.id,status,error,this.noticeSink);
+  if(spec.kind!=='event'||spec.teamId!==app.config.teamId||!/^[a-f0-9]{64}$/.test(context.id))return;
+  const input=await app.store.get<Input>('inputs',spec.cardId),actor=input?.actor;
+  if(input?.kind!=='app_mention'||!actor||actor.teamId!==spec.teamId||actor.userId===this.botUserId||!ID.user.test(actor.userId)||!ID.channel.test(actor.channelId)){report('skipped');return;}
+  const key=createHash('sha256').update('event-notice:'+context.id).digest('hex');
+  if(await app.store.get('event_notices',key)){report('duplicate');return;}
+  if(await app.mode(actor.channelId)==='off'){report('skipped');return;}
+  const signal=AbortSignal.timeout(10_000);
+  try{await authorizeChannel(app.api,await app.accessConfig(actor),actor,signal);}
+  catch(error){report('skipped',error);return;}
+  interface Notice {state:'attempted'|'sent'|'failed';attemptedAt:number;finishedAt?:number;errorCode?:string;}
+  const attemptedAt=Date.now(),expiresAt=attemptedAt+7*86400_000;
+  const claimed=await app.store.atomic<Notice,boolean>('event_notices',key,current=>({value:current??{state:'attempted',attemptedAt},expiresAt:current?current.attemptedAt+7*86400_000:expiresAt,result:!current}));
+  if(!claimed){report('duplicate');return;}
+  let state:'sent'|'failed'='sent',failure:unknown;
+  try{await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:'한글 문서 요청을 완료하지 못했습니다. 앱의 채널 참여와 파일 공유 상태를 확인한 뒤 다시 요청해 주세요. 문제가 계속되면 관리자에게 앱 연결과 권한 확인을 요청해 주세요.'},signal);}
+  catch(error){state='failed';failure=error;}
+  report(state,failure);
+  // Recording a send attempt first avoids duplicate posts after ambiguous responses or crashes.
+  await app.store.atomic<Notice,void>('event_notices',key,current=>({value:current?.state==='attempted'?{...current,state,finishedAt:Date.now(),...(state==='failed'?{errorCode:errorCode(failure)}:{})}:current,expiresAt,result:undefined}));
  }
  private threadKey(actor:Actor,fileId:string){return JSON.stringify([actor.teamId,actor.channelId,actor.threadTs,fileId]);}
  private async remember(actor:Actor,fileId:string){
@@ -23,6 +49,7 @@ export class CloudEvents {
  }
  async execute(spec:TaskSpec,context:TaskContext):Promise<void>{
   const app=this.application;if(spec.teamId!==app.config.teamId)throw new Error('Wrong workspace');
+  if(context.terminalFailure)return;
   const input=await app.store.get<Input>('inputs',spec.cardId);if(!input)throw new Error('Missing event');
   if(input.kind==='file_deleted'||input.kind==='file_unshared'){if(input.fileId)await app.invalidate(input.fileId,input.kind==='file_unshared');return;}
   if(input.kind==='home'){await new Settings(app.config,app.api,undefined,app.store).home(app.config.teamId,input.user!);return;}
@@ -56,9 +83,15 @@ export class CloudEvents {
   if(!files.length){
    files=(await app.store.list<{team:string;channel:string;parent:string;file:string}>('observed')).map(([,r])=>r).filter(r=>r.team===actor.teamId&&r.channel===actor.channelId&&r.parent===actor.threadTs).map(r=>r.file);
    // Release the single dispatch slot. A later file_shared task must be able to run.
-   if(!files.length&&Date.now()-(input.receivedAt??0)<30_000)throw new Error('Awaiting file share event');
+   if(!files.length&&Date.now()-(input.receivedAt??0)<30_000){eventInputObserved('awaiting_share');throw new AttachmentPendingError();}
   }
-  if(!files.length){await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:'HWP/HWPX 파일과 함께 @rhwp를 멘션해 주세요. 이전 파일은 해당 메시지 메뉴의 한글 문서 열기로 요청할 수 있습니다.'},context.signal);return;}
+  if(!files.length){
+   eventInputObserved('attachment_required');
+   try{await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:'HWP/HWPX 파일과 함께 @rhwp를 멘션해 주세요. 이전 파일은 해당 메시지 메뉴의 한글 문서 열기로 요청할 수 있습니다.'},context.signal);eventInputNoticeFinished('sent');}
+   catch(error){eventInputNoticeFinished('failed',error);throw error;}
+   return;
+  }
+  eventInputObserved('files_available');
   if(files.length>10)throw new UserError('too_many_files','한 번에 문서 10개까지 요청할 수 있습니다.');
   for(const id of new Set(files))if(ID.file.test(id)){
    await context.checkpoint();await authorizeFile(app.api,await app.accessConfig(actor),actor,id,context.signal);

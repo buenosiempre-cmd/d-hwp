@@ -14,6 +14,7 @@ import {PdfJobs} from './pdf-jobs';
 import type {State} from './state';
 import {denied,UserError} from './errors';
 export interface Card {
+  noticeTarget?:{fileId:string;cardId:string;teamId:string;channelId:string;messageTs:string;generation:string;botUserId:string};
   id:string;actor:Actor;fileId:string;rootFileId:string;name:string;size:number;createdAt:number;
   origin?:string;contentHash?:string;
   revision:number;sequence?:number;parentId?:string;parentTs?:string;messageTs?:string;posting?:boolean;

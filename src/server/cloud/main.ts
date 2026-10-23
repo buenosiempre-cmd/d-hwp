@@ -1,5 +1,5 @@
 import {closeConversionRuntime} from '../../conversion/convert.mjs';
-import {traceTask,runtimeId} from './telemetry';
+import {runtimeId} from './telemetry';
 import {Firestore} from '@google-cloud/firestore';
 import {CloudTasksClient} from '@google-cloud/tasks';
 import {loadConfig} from '../config';
@@ -10,7 +10,7 @@ import {GoogleTaskPublisher,DurableTasks} from './tasks';
 import {CloudApplication} from './application';
 import {CloudEvents} from './events';
 import {createCloudReceiver} from './receiver';
-import {workerServer} from './worker';
+import {workspaceWorker} from './workspace-worker';
 async function main(){try{
  const starting=Date.now();
  const required=(name:string)=>{const value=process.env[name];if(!value)throw new Error('Missing cloud setting');return value;};
@@ -23,7 +23,7 @@ async function main(){try{
  const application=new CloudApplication(config,api,store,tasks);
  const events=new CloudEvents(application,identity.botUserId);
  const runtime=role==='ingress'?createCloudReceiver(config,application,identity):undefined;
- const worker=role==='worker'?workerServer(tasks,(spec,ctx)=>traceTask(spec,ctx,async()=>{if(spec.kind==='event')await events.execute(spec,ctx);else await application.execute(spec,ctx);}),{audience:required('WORKER_ORIGIN'),serviceAccount:required('TASK_SERVICE_ACCOUNT')}):undefined;
+ const worker=role==='worker'?workspaceWorker(tasks,application,events,{audience:required('WORKER_ORIGIN'),serviceAccount:required('TASK_SERVICE_ACCOUNT')}):undefined;
  if(runtime)await runtime.receiver.start({host:'0.0.0.0',port:config.port});else await new Promise<void>(resolve=>worker!.listen(config.port,'0.0.0.0',resolve));
  console.log(JSON.stringify({event:'cloud_ready',runtimeId,role,initializationMs:Date.now()-starting,processUptimeMs:Math.round(process.uptime()*1000)}));
  let stopping=false;const stop=async()=>{if(stopping)return;stopping=true;if(runtime)await runtime.receiver.stop();if(worker)await new Promise<void>(r=>worker.close(()=>r()));await closeConversionRuntime();await database.terminate();await client.close();};
