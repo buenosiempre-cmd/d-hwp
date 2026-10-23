@@ -32,6 +32,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: python3 scripts/prepare-studio-archive.py
       - run: docker build --target smoke -t rhwp-slack:smoke .
       - name: Test server PDF with production memory limit
         run: >-

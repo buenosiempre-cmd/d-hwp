@@ -7,7 +7,7 @@ const cache = resolve('.cache');
 mkdirSync(cache, {recursive:true});
 const archive = resolve(cache, 'studio.tar');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-if (!existsSync(archive)) throw new Error('Pinned Studio source archive is required; upstream fetch is disabled');
+if (!existsSync(archive)) execFileSync('python3', ['scripts/prepare-studio-archive.py'], {stdio:'inherit',timeout:600_000});
 if (hash(readFileSync(archive)) !== spec.archiveSha256) throw new Error('Studio source archive integrity mismatch');
 const source = resolve(cache, 'studio-source');
 mkdirSync(source, {recursive:true});
