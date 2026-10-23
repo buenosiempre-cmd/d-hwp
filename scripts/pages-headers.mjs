@@ -20,6 +20,7 @@ export function pagesHeaders(apiOrigin,{publicSite=false}={}){
   `/*\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n${publicSite?'':'  X-Robots-Tag: noindex, nofollow\n'}  Content-Security-Policy: ${editorPolicy(origin)}${publicSite?"; media-src 'self'":""}`,
   `/editor/*\n  Cache-Control: no-cache${publicSite?'\n  X-Robots-Tag: noindex, nofollow':''}`,
   `/api/*\n  Cache-Control: no-store${publicSite?'\n  X-Robots-Tag: noindex, nofollow':''}`,
+  '/locale-init.js\n  Cache-Control: no-cache\n  X-Robots-Tag: noindex, nofollow',
   '/404.html\n  Cache-Control: no-store',
   `/static/*\n${publicSite?'  X-Robots-Tag: noindex, nofollow\n':''}  Cache-Control: public, max-age=31536000, immutable`,
  ];

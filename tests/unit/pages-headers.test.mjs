@@ -14,9 +14,10 @@ const parse=text=>Object.fromEntries(text.trimEnd().split('\n\n').map(block=>{
 test('both roles keep editor/API policy and cache current and retained namespaces with one static rule',()=>{
  for(const publicSite of [false,true]){
   const text=pagesHeaders(origin,{publicSite}),rules=parse(text);
-  assert.equal(Object.keys(rules).length,publicSite?17:5);
+  assert.equal(Object.keys(rules).length,publicSite?18:6);
   assert.equal(rules['/editor/*']['Cache-Control'],'no-cache');
   assert.equal(rules['/api/*']['Cache-Control'],'no-store');
+  assert.deepEqual(rules['/locale-init.js'],{'Cache-Control':'no-cache','X-Robots-Tag':'noindex, nofollow'});
   assert.equal(rules['/404.html']['Cache-Control'],'no-store');
   assert.equal(rules['/static/*']['Cache-Control'],'public, max-age=31536000, immutable');
   assert.equal(Object.keys(rules).filter(path=>path.startsWith('/static/')).length,1);
