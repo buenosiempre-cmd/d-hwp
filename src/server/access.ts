@@ -1,3 +1,4 @@
+import {markSourceUnavailable} from './source-failure';
 import type {Config} from './config';
 import {ID} from './config';
 import type {SlackApi} from './slack-api';
@@ -39,7 +40,9 @@ export async function authorizeBotChannel(api:SlackApi,config:Config,actor:Actor
 export async function authorizeFile(api: SlackApi, config: Config, actor: Actor, fileId: string, signal?: AbortSignal): Promise<SourceFile> {
   assertActor(config,actor);if(!ID.file.test(fileId))denied();
   const c=await authorizeChannel(api,config,actor,signal);
-  const f=object((await api.call('files.info',{file:fileId},signal)).file);
+  let response:Record<string,unknown>;
+  try{response=await api.call('files.info',{file:fileId},signal);}catch(error){markSourceUnavailable(error);throw error;}
+  const f=object(response.file);
   if (f.id!==fileId || f.mode!=='hosted' || f.is_external!==false || (f.is_restricted_sharing_enabled!==undefined && f.is_restricted_sharing_enabled!==false) ||
       (f.file_access!==undefined && f.file_access!=='visible') || f.is_tombstoned===true || f.has_more_shares===true || f.skipped_shares===true ||
       (f.restriction_type!==undefined && f.restriction_type!==0) ||

@@ -4,11 +4,11 @@ rhwp for Slack의 자체 코드·문서에는 MIT License를 적용합니다. �
 
 ## rhwp 엔진과 편집기
 
-- rhwp / rhwp-studio / `@rhwp/core` / `@rhwp/editor`: **0.8.6**, MIT, Copyright (c) 2025–2026 Edward Kim.
-- 고정 소스: `f1f9c6ae58344ee9368996d3543f76b9345cf227`.
-- [원본 MIT License](https://github.com/edwardkim/rhwp/blob/f1f9c6ae58344ee9368996d3543f76b9345cf227/LICENSE).
-- [upstream 제3자 라이선스 목록](https://github.com/edwardkim/rhwp/blob/f1f9c6ae58344ee9368996d3543f76b9345cf227/THIRD_PARTY_LICENSES.md).
-- [폰트 출처와 라이선스 목록](https://github.com/edwardkim/rhwp/blob/f1f9c6ae58344ee9368996d3543f76b9345cf227/assets/fonts/FONTS.md).
+- rhwp / rhwp-studio / `@rhwp/core` / `@rhwp/editor`: **0.8.7**, MIT, Copyright (c) 2025–2026 Edward Kim.
+- 고정 소스: `1a76570e833917d15817415a53c09ad61ab3203f`.
+- [원본 MIT License](https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/LICENSE).
+- [upstream 제3자 라이선스 목록](https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/THIRD_PARTY_LICENSES.md).
+- [폰트 출처와 라이선스 목록](https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/assets/fonts/FONTS.md).
 
 빌드에는 upstream의 LICENSE·THIRD_PARTY_LICENSES.md·폰트 고지를 포함합니다. Studio, CanvasKit 및 폰트에 앱의 MIT License를 일괄 적용하지 않습니다. OFL·GUST·각 배포처의 개별 폰트 조건을 유지하세요.
 

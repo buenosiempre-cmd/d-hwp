@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {traceTask,traceEditor,measured,milestone,errorCode,conversionMetric} from '../../src/server/cloud/telemetry';
+import {traceTask,traceEditor,measured,milestone,errorCode,conversionMetric,terminalNoticeResult} from '../../src/server/cloud/telemetry';
 import {HttpSlackApi} from '../../src/server/slack-api';
 import {FirestoreMetadata} from '../../src/server/cloud/firestore-metadata';
 import type {Firestore} from '@google-cloud/firestore';
@@ -8,6 +8,16 @@ import {validMetric} from '../../src/conversion/convert.mjs';
 import {UserError} from '../../src/server/errors';
 const context={signal:new AbortController().signal,async checkpoint(){},id:'a'.repeat(64),attempt:2};
 const spec={teamId:'TTEST',cardId:'private-card-name',kind:'preview' as const};
+test('terminal delivery telemetry validates status and budget without exposing arbitrary error fields',async()=>{
+ const rows:Record<string,unknown>[]=[],secret='xoxb-secret private-document https://private.example.com';
+ terminalNoticeResult(context.id,'failed',1,Object.assign(new Error(secret),{slackError:secret}),r=>rows.push(r));
+ assert.equal(rows[0]?.event,'terminal_notice_finished');assert.equal(rows[0]?.errorCode,'internal');assert.doesNotMatch(JSON.stringify(rows),/xoxb-|private-document|private.example/);
+ for(const attempt of [-1,4,NaN,Infinity,1.5])terminalNoticeResult(context.id,'failed',attempt,undefined,r=>rows.push(r));
+ terminalNoticeResult(secret,'sent',1,undefined,r=>rows.push(r));terminalNoticeResult(context.id,secret as any,1,undefined,r=>rows.push(r));assert.equal(rows.length,1);
+ assert.doesNotThrow(()=>terminalNoticeResult(context.id,'sent',1,undefined,()=>{throw new Error(secret);}));
+ await traceTask(spec,{...context,terminalNotice:{phase:'bookkeeping'}},async()=>{},r=>rows.push(r));
+ assert.equal(rows.at(-1)?.terminalPhase,'bookkeeping');
+});
 test('stage failures keep numeric timings and error codes without logging exception contents or document identifiers',async()=>{
  const rows:Record<string,unknown>[]=[];
  await assert.rejects(traceTask(spec,context,()=>measured('download',async()=>{throw new UserError('slack_unavailable','xoxb-secret https://files.slack.com/private document name');}),r=>rows.push(r)));

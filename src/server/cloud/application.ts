@@ -1,11 +1,13 @@
+import type {NoticeReason} from './tasks';
+import {isSourceUnavailable} from '../source-failure';
 import {isPermanentConversionFailure} from '../../conversion/failures.mjs';
 import {createHash,randomUUID} from 'node:crypto';
-import {measured,conversionMetric,milestone,errorCode,notificationFailure} from './telemetry';
+import {measured,conversionMetric,milestone,errorCode,notificationFailure,unshareVisibilityUnavailable,shareCheckFinished,artifactFinished} from './telemetry';
 import {setTimeout as delay} from 'node:timers/promises';
 import type {MetadataStore} from './metadata';
 import {BoundedWork,serialWrites} from '../concurrency';
 import {SharedSessions} from './sessions';
-import {DurableTasks,MAX_TASK_ATTEMPTS,type TaskSpec,type TaskContext} from './tasks';
+import {DurableTasks,MAX_TASK_ATTEMPTS,TerminalNoticeFailure,type TaskSpec,type TaskContext} from './tasks';
 import {withLease,type LeaseContext} from './lease';
 import type {Config} from '../config';
 import {ID} from '../config';
@@ -19,17 +21,18 @@ import {downloadFile} from '../download';
 import {Uploads,savedAttempt,type UploadAttempt} from '../uploads';
 import {documentMetadata,documentMessage,browserEditorUrl} from '../document-message';
 import {UserError,denied} from '../errors';
+import {slackDiagnostics,isSlackFailure} from '../slack-diagnostics';
 import {validateDocument} from '../validate-document';
 import {validateInput} from '../../shared/errors';
 import {convertPreview,convertPageImages,type PageImage} from '../../conversion/convert.mjs';
-interface CloudCard extends Omit<Card,'imageAttempts'|'imageWork'|'updates'> {attempts?:Record<string,UploadAttempt>;fence?:string;removed?:boolean;previewRequestId?:string;}
+interface CloudCard extends Omit<Card,'imageAttempts'|'imageWork'|'updates'> {attempts?:Record<string,UploadAttempt>;fence?:string;removed?:boolean;previewRequestId?:string;pdfPreparedAt?:number;slackPublishedAt?:number;}
 interface Request {actor:Actor;fileId:string;}
 interface SaveOperation {hash:string;cardId:string;attempt:UploadAttempt;receipt:Receipt;}
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const stableId=(value:string)=>{const h=hash(value);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;};
 export class CloudApplication {
   readonly sessions:SharedSessions;
-  constructor(readonly config:Config,readonly api:SlackApi,readonly store:MetadataStore,readonly tasks:DurableTasks,private options:{download?:typeof downloadFile;convert?:typeof convertPreview;images?:typeof convertPageImages;fetcher?:typeof fetch}={}){
+  constructor(readonly config:Config,readonly api:SlackApi,readonly store:MetadataStore,readonly tasks:DurableTasks,private options:{download?:typeof downloadFile;convert?:typeof convertPreview;images?:typeof convertPageImages;fetcher?:typeof fetch;noticeIdentity?:{generation:string;botUserId:string;check:()=>Promise<void>}}={}){
     this.sessions=new SharedSessions(store,async(id,actor)=>{await this.authorize(id,actor);});
   }
   async mode(channel:string):Promise<'auto'|'mention'|'off'>{
@@ -41,15 +44,16 @@ export class CloudApplication {
     if(actor.teamId!==this.config.teamId||!ID.user.test(actor.userId)||!ID.channel.test(actor.channelId)||await this.mode(actor.channelId)==='off')denied();
     return {...this.config,channelIds:new Set([actor.channelId])};
   }
-  async authorize(id:string,actor:Actor):Promise<CloudCard>{return (await this.authorizedSource(id,actor)).card;}
-  private async authorizedSource(id:string,actor:Actor):Promise<{card:CloudCard;source:SourceFile}>{
-    return measured('authorize',()=>this.authorizeUnmeasured(id,actor));
+  async authorize(id:string,actor:Actor,context?:TaskContext):Promise<CloudCard>{return (await this.authorizedSource(id,actor,context)).card;}
+  private async authorizedSource(id:string,actor:Actor,context?:TaskContext):Promise<{card:CloudCard;source:SourceFile}>{
+    return measured('authorize',()=>this.authorizeUnmeasured(id,actor,context));
   }
-  private async authorizeUnmeasured(id:string,actor:Actor):Promise<{card:CloudCard;source:SourceFile}>{
+  private async authorizeUnmeasured(id:string,actor:Actor,context?:TaskContext):Promise<{card:CloudCard;source:SourceFile}>{
     const config=await this.accessConfig(actor),card=await this.store.get<CloudCard>('cards',id);
     if(!card||card.removed||card.actor.teamId!==actor.teamId||card.actor.channelId!==actor.channelId)denied();
-    const source=await authorizeFile(this.api,config,actor,card.fileId);
-    if(card.rootFileId!==card.fileId)await authorizeFile(this.api,config,actor,card.rootFileId);
+    const api=context?this.guarded(context):this.api;
+    const source=await authorizeFile(api,config,actor,card.fileId,context?.signal);
+    if(card.rootFileId!==card.fileId)await authorizeFile(api,config,actor,card.rootFileId,context?.signal);
     if(source.name!==card.name||source.size!==card.size)denied();return {card,source};
   }
   async ensureSource(id:string,actor:Actor,outer?:AbortSignal):Promise<Buffer>{
@@ -115,7 +119,19 @@ export class CloudApplication {
     });
     if(taskId)await this.tasks.dispatch(taskId);
   }
-  private guarded(context:TaskContext):SlackApi{return {call:async(method,args,signal)=>{await context.checkpoint();return this.api.call(method,args,AbortSignal.any([context.signal,...(signal?[signal]:[])]));}};}
+  private guarded(context:TaskContext):SlackApi{return {call:async(method,args,signal)=>{
+    await context.checkpoint();
+    const combined=AbortSignal.any([context.signal,...(signal?[signal]:[])]);
+    let result:Record<string,unknown>;
+    try{result=await this.api.call(method,args,combined);}
+    catch(error){
+      if(context.terminalNotice?.phase!=='notice'||!isSlackFailure(error))throw error;
+      await context.checkpoint();combined.throwIfAborted();
+      throw new TerminalNoticeFailure(error);
+    }
+    if(context.terminalNotice?.phase==='notice')await context.checkpoint();
+    return result;
+  }};}
   private async write(card:CloudCard,context:LeaseContext):Promise<void>{
     await context.checkpoint();
     await this.store.atomic<CloudCard,void>('cards',card.id,current=>{
@@ -141,14 +157,22 @@ export class CloudApplication {
     const api=this.guarded(context),uploads=this.uploads(card,context);
     if(card.messageTs)return;
     if(card.posting){
-      const ts=await uploads.sharedMessage(card.fileId,{...card.actor,threadTs:card.parentTs});
+      const ts=await uploads.sharedMessage(card.fileId,{...card.actor,threadTs:card.parentTs},undefined,check=>shareCheckFinished(check,'source'));
       if(!ts)throw new UserError('card_pending','기존 카드의 공유 결과를 확인 중입니다.');
       card.messageTs=ts;card.actor.threadTs??=ts;await this.write(card,context);return;
     }
     card.posting=true;await this.write(card,context);await this.authorize(card.id,card.actor);
     const posted=await api.call('chat.postMessage',{...documentMessage(card,this.config.publicOrigin!,this.config.editorMode),client_msg_id:card.id,...(card.parentTs?{thread_ts:card.parentTs}:{})});
     if(typeof posted.ts!=='string'||!/^\d+\.\d+$/.test(posted.ts))throw new Error('Missing message receipt');
-    card.messageTs=posted.ts;card.actor.threadTs??=posted.ts;await this.write(card,context);milestone('first_card');
+    card.messageTs=posted.ts;
+    await this.recordNoticeTarget(card);
+    card.actor.threadTs??=posted.ts;await this.write(card,context);milestone('first_card');
+  }
+  // Mint only after this application directly receives an authenticated post receipt.
+  // Reconciled/shared message timestamps cannot establish ownership of a legacy card.
+  private async recordNoticeTarget(card:CloudCard):Promise<void>{
+    const identity=this.options.noticeIdentity;
+    if(identity&&card.messageTs){await identity.check();card.noticeTarget={fileId:card.fileId,cardId:card.id,teamId:card.actor.teamId,channelId:card.actor.channelId,messageTs:card.messageTs,generation:identity.generation,botUserId:identity.botUserId};}
   }
   private async update(card:CloudCard,actor:Actor,context:LeaseContext):Promise<void>{return measured('card_update',()=>this.updateUnmeasured(card,actor,context));}
   private async updateUnmeasured(card:CloudCard,actor:Actor,context:LeaseContext):Promise<void>{
@@ -160,7 +184,7 @@ export class CloudApplication {
     const uploads=this.uploads(card,context);
     for(let i=0;i<6;i++){
       await this.authorize(authorizationId,actor);
-      if(await uploads.sharedMessage(fileId,{...card.actor,threadTs:card.parentTs},card.messageTs))return;
+      if(await uploads.sharedMessage(fileId,{...card.actor,threadTs:card.parentTs},card.messageTs,check=>shareCheckFinished(check,fileId===card.pdfFileId?'pdf':card.images?.some(page=>page.fileId===fileId)?'png':fileId===card.fileId?'source':'other',i+1)))return;
       if(i<5)await delay(200*2**i,undefined,{signal:context.signal});
     }
     throw new UserError('share_pending','파일 공유 결과를 확인 중입니다.');
@@ -168,12 +192,30 @@ export class CloudApplication {
   async execute(spec:TaskSpec,task:TaskContext):Promise<void>{
     if(task.terminalFailure){await this.failed(spec,task,task.terminalFailure,true);return;}
     try{await this.executeWork(spec,task);}
-    catch(error){await this.failed(spec,task,errorCode(error),!!task.finalAttempt||isPermanentConversionFailure(errorCode(error))).catch(()=>{});throw error;}
+    catch(error){
+      const final=!!task.finalAttempt||isPermanentConversionFailure(errorCode(error));
+      // DurableTasks commits the business failure before starting any terminal Slack notice.
+      await this.failed(spec,final?{...task,terminalNotice:{phase:'bookkeeping'}}:task,errorCode(error),final).catch(()=>{});
+      throw error;
+    }
+  }
+  private async statusTarget(card:CloudCard,spec:TaskSpec,context:TaskContext):Promise<NoticeReason|undefined>{
+    const identity=this.options.noticeIdentity;
+    const fresh=await this.store.get<CloudCard>('cards',card.id);
+    if(!fresh||fresh.removed||(fresh.recovery&&fresh.recovery.taskId!==card.recovery?.taskId))return 'superseded';
+    const target=fresh.noticeTarget;
+    if(!identity)return 'installation_mismatch';
+    await identity.check();await context.checkpoint();
+    if(!target)return 'receipt_missing';
+    if(target.generation!==identity.generation||target.botUserId!==identity.botUserId)return 'installation_mismatch';
+    if(target.fileId!==fresh.fileId||target.fileId!==card.fileId||fresh.messageTs!==card.messageTs||fresh.actor.channelId!==card.actor.channelId||fresh.actor.teamId!==card.actor.teamId||target.cardId!==spec.cardId||target.cardId!==card.id||target.teamId!==spec.teamId||target.teamId!==card.actor.teamId||target.channelId!==card.actor.channelId||target.messageTs!==card.messageTs||
+      (spec.actor&&(spec.actor.teamId!==target.teamId||spec.actor.channelId!==target.channelId)))return 'target_mismatch';
   }
   private async failed(spec:TaskSpec,task:TaskContext,code:string,final:boolean):Promise<void>{
     await task.checkpoint();
     const card=await this.store.get<CloudCard>('cards',spec.cardId);
     if(!card){
+      if(task.terminalNotice){task.terminalNotice.result='skipped';task.terminalNotice.reason='card_missing';return;}
       if(spec.kind==='prepare'){
         const request=await this.store.get<Request>('preparations',spec.cardId);
         if(request){await authorizeFile(this.api,await this.accessConfig(request.actor),request.actor,request.fileId);await this.reaction(spec.cardId,request.actor,final?'failed':'pending',true);}
@@ -182,33 +224,57 @@ export class CloudApplication {
     }
     if(spec.teamId!==this.config.teamId||card.actor.teamId!==spec.teamId)denied();
     await this.locked(card.id,async(current,lease)=>{
-      const context:LeaseContext={...lease,signal:AbortSignal.any([task.signal,lease.signal]),checkpoint:async()=>{await task.checkpoint();await lease.checkpoint();}};
+      const context:LeaseContext={...lease,terminalNotice:task.terminalNotice,signal:AbortSignal.any([task.signal,lease.signal]),checkpoint:async()=>{await task.checkpoint();await lease.checkpoint();}};
       await context.checkpoint();
       // A deadline notification from an older generation cannot overwrite a manual retry.
-      if(current.recovery&&current.recovery.taskId!==task.id)return;
-      if(current.pdf==='ready'&&current.imageState==='ready')return;
+      if(current.removed||(current.recovery&&current.recovery.taskId!==task.id)||(current.pdf==='ready'&&current.imageState==='ready')){
+        if(task.terminalNotice){task.terminalNotice.result='skipped';task.terminalNotice.reason='superseded';}return;
+      }
       current.recovery={taskId:task.id??'legacy',state:final?'failed':'retrying',attempt:task.attempt??1,maxAttempts:task.maxAttempts??MAX_TASK_ATTEMPTS,errorCode:code};
       if(current.pdf!=='ready')current.pdf=final?'failed':'pending';
       if(current.imageState!=='ready')current.imageState=final?'failed':'pending';
       // A revoked actor must not prevent durable failure bookkeeping.
-      await this.write(current,context);
+      if(task.terminalNotice?.phase!=='notice')await this.write(current,context);
+      if(task.terminalNotice?.phase==='bookkeeping'){
+        // Read current policy before consuming an external attempt, without calling Slack.
+        await this.mode(current.actor.channelId);
+        task.terminalNotice.result=current.messageTs?'ready':'skipped';if(!current.messageTs)task.terminalNotice.reason='message_missing';return;
+      }
       if(current.messageTs){
-        try{await this.authorize(current.id,spec.actor??current.actor);}
+        try{await this.authorize(current.id,spec.actor??current.actor,context);}
         catch(error){
-          if(!(error instanceof UserError)||error.code!=='access_denied')throw error;
-          await authorizeBotChannel(this.guarded(context),await this.accessConfig(current.actor),current.actor,context.signal);
+          const missing=isSourceUnavailable(error);
+          // Reserve this final status for the durable notice state machine, not business retries.
+          if(missing&&task.terminalNotice?.phase!=='notice')return;
+          if(!missing&&(!(error instanceof UserError)||error.code!=='access_denied'))throw error;
+          const blocked=await this.statusTarget(current,spec,context);
+          if(blocked){if(task.terminalNotice){task.terminalNotice.result='skipped';task.terminalNotice.reason=blocked;}return;}
+          try{await authorizeBotChannel(this.guarded(context),await this.accessConfig(current.actor),current.actor,context.signal);}
+          catch(denial){
+            if(task.terminalNotice&&denial instanceof UserError&&denial.code==='access_denied'){task.terminalNotice.result='skipped';task.terminalNotice.reason='channel_access_unavailable';return;}
+            if(task.terminalNotice)task.terminalNotice.reason='channel_access_unavailable';
+            throw denial;
+          }
           // Never reuse documentMessage here: its file_ids/metadata can share new files.
-          const text=final?'권한 변경으로 PDF·이미지 준비가 중단되었습니다. 채널 참여와 문서 접근 권한을 확인한 뒤 다시 시도하세요.':'권한을 확인할 수 없어 PDF·이미지 준비를 다시 확인하고 있습니다.';
+          const text=missing?(current.pdfPreparedAt?'PDF는 생성됐지만 원본 파일에 접근할 수 없어 Slack 게시를 완료하지 못했습니다. 원본의 존재와 앱에 공유된 상태를 확인해 주세요.':'원본 파일에 접근할 수 없어 PDF·이미지 준비를 완료하지 못했습니다. 원본의 존재와 앱에 공유된 상태를 확인해 주세요.'):'문서 접근을 확인할 수 없어 PDF·이미지 준비가 중단되었습니다. 채널 참여와 문서 접근 권한을 확인해 주세요.';
+          if(task.terminalNotice)task.terminalNotice.reason=missing?'source_unavailable':'access_unavailable';
+          const changed=await this.statusTarget(current,spec,context);
+          if(changed){if(task.terminalNotice){task.terminalNotice.result='skipped';task.terminalNotice.reason=changed;}return;}
+          await this.options.noticeIdentity!.check();
           await this.guarded(context).call('chat.update',{channel:current.actor.channelId,ts:current.messageTs,text,blocks:[
             {type:'section',text:{type:'plain_text',text}},
-            ...(final?[{type:'actions',elements:[{type:'button',action_id:'rhwp_retry_preview',value:current.id,text:{type:'plain_text',text:'문서 미리보기 다시 준비'}}]}]:[]),
           ],parse:'none',unfurl_links:false,unfurl_media:false});
-          await this.reaction(current.id,current.actor,final?'failed':'pending',true);
+          if(task.terminalNotice)task.terminalNotice.result='sent';
+          if(!missing)await this.reaction(current.id,current.actor,final?'failed':'pending',true).catch(()=>{});
           return;
         }
-        await this.update(current,spec.actor??current.actor,context);
+        // A status update must not re-share uploaded but unconfirmed files.
+        const {file_ids:_files,metadata:_metadata,...notice}=documentMessage(current,this.config.publicOrigin!,this.config.editorMode);
+        await this.guarded(context).call('chat.update',{...notice,ts:current.messageTs});
+        if(task.terminalNotice)task.terminalNotice.result='sent';
       }
-      await this.reaction(current.id,current.actor,final?'failed':'pending',true);
+      else if(task.terminalNotice)task.terminalNotice.result='skipped';
+      await this.reaction(current.id,current.actor,final?'failed':'pending',true).catch(()=>{});
     });
   }
   private async executeWork(spec:TaskSpec,task:TaskContext):Promise<void>{
@@ -234,6 +300,10 @@ export class CloudApplication {
       try{await this.update(card,actor,context);}catch(error){notificationFailure('preview_progress',error);}
       const bytes=await this.ensureSource(card.id,actor,context.signal);
       const serial=serialWrites(),persist=()=>serial(()=>this.write(card,context)),publish=()=>serial(()=>this.update(card,actor,context));
+      const recordPdf=async(pdf:Buffer)=>{
+        if(!pdf.subarray(0,5).equals(Buffer.from('%PDF-')))throw new Error('Invalid PDF completion evidence');
+        if(!card.pdfPreparedAt){card.pdfPreparedAt=Date.now();await persist();artifactFinished('pdf_prepared');}
+      };
       const pool=new BoundedWork(this.config.imageUploadConcurrency??1),pdfWork=new BoundedWork(1);
       const finishUploads=async()=>{
         // Neither failure may release the lease while the other upload still runs.
@@ -250,13 +320,15 @@ export class CloudApplication {
       const publishPdf=async(pdf:Buffer,count:number)=>{
         await setCount(count);
         if(!card.pdfFileId){
+          if(!card.pdfPreparedAt)await recordPdf(pdf);
           card.pdfAttempt??={};
           const f=await measured('upload_pdf',()=>uploads.store(card.pdfAttempt!,pdf,card.name.replace(/\.(hwp|hwpx)$/i,'.pdf'),actor,check));
           if(!f.url)throw new Error('PDF permalink missing');card.pdfFileId=f.id;card.pdfUrl=f.url;await persist();
         }
-        if(card.pdf!=='ready'){
+        if(card.pdf!=='ready'||(!!card.pdfPreparedAt&&!card.slackPublishedAt)){
           await publish();await this.confirm(card,card.pdfFileId,actor,context);
           card.pdf='ready';await publish();milestone('pdf_ready');
+          if(card.pdfPreparedAt&&!card.slackPublishedAt){card.slackPublishedAt=Date.now();await persist();artifactFinished('slack_published');}
         }
       };
       const uploadPage=async(page:PageImage,count:number)=>{
@@ -279,7 +351,7 @@ export class CloudApplication {
       const limit=Math.min(target,card.pageCount??target);
       const first=Array.from({length:limit},(_,i)=>i+1).find(page=>!card.images?.some(p=>p.page===page));
       if(!card.pdfFileId){
-        const result=await measured('conversion',()=>(this.options.convert??convertPreview)(bytes,{timeoutMs:120_000,signal:context.signal,onMetric:conversionMetric,onPdf:(pdf,count)=>pdfWork.add(()=>publishPdf(pdf,count)),onPage:(page,count)=>pool.add(()=>uploadPage(page,count))}));
+        const result=await measured('conversion',()=>(this.options.convert??convertPreview)(bytes,{timeoutMs:120_000,signal:context.signal,onMetric:conversionMetric,onPdf:async(pdf,count)=>{await setCount(count);await recordPdf(pdf);await pdfWork.add(()=>publishPdf(pdf,count));},onPage:(page,count)=>pool.add(()=>uploadPage(page,count))}));
         // Also support non-streaming converter adapters. Receipts make this idempotent.
         await pdfWork.finish();await publishPdf(result.pdf,result.pageCount);await pool.finish();for(const page of result.pages)await uploadPage(page,result.pageCount);
       }else if(first!==undefined){
@@ -339,8 +411,9 @@ export class CloudApplication {
       await this.locked(operation.cardId,async(card,lease)=>{
         if(!card.messageTs&&!card.posting){card.posting=true;await this.write(card,lease);await this.authorize(parent.id,session.actor);
           const r=await this.guarded(lease).call('chat.postMessage',{...documentMessage(card,this.config.publicOrigin!,this.config.editorMode),client_msg_id:card.id,thread_ts:card.parentTs});
-          if(typeof r.ts==='string'){card.messageTs=r.ts;await this.write(card,lease);}}
-        if(!card.messageTs){const ts=await uploads.sharedMessage(f.id,{...card.actor,threadTs:card.parentTs});if(!ts)throw new UserError('upload_uncertain','저장 결과를 확인 중입니다. 같은 저장 요청으로 다시 확인하세요.');card.messageTs=ts;await this.write(card,lease);}
+          if(typeof r.ts!=='string'||!/^\d+\.\d+$/.test(r.ts))throw new Error('Missing message receipt');
+          card.messageTs=r.ts;await this.recordNoticeTarget(card);await this.write(card,lease);}
+        if(!card.messageTs){const ts=await uploads.sharedMessage(f.id,{...card.actor,threadTs:card.parentTs},undefined,check=>shareCheckFinished(check,'source'));if(!ts)throw new UserError('upload_uncertain','저장 결과를 확인 중입니다. 같은 저장 요청으로 다시 확인하세요.');card.messageTs=ts;await this.write(card,lease);}
         if(this.config.editorMode==='browser'){
           // Slack chat.postMessage does not attach file_ids. Add the private revision
           // through chat.update before checking its own channel shares.
@@ -356,7 +429,24 @@ export class CloudApplication {
     });
   }
   async invalidate(fileId:string,unshared=false):Promise<void>{
-    const keep=unshared?await sharedChannels(this.api,this.config.teamId,fileId):undefined;
+    if(unshared){
+      const cards=await this.store.list<CloudCard>('cards');
+      const observed=await this.store.list<{file:string}>('observed');
+      if(!cards.some(([,card])=>card.fileId===fileId||card.rootFileId===fileId)&&!observed.some(([,record])=>record.file===fileId))return;
+    }
+    let keep:ReadonlySet<string>|undefined;
+    if(unshared){
+      try{keep=await sharedChannels(this.api,this.config.teamId,fileId);}
+      catch(error){
+        const diagnostics=slackDiagnostics(error);
+        if(ID.file.test(fileId)&&error instanceof UserError&&error.code==='slack_rejected'&&diagnostics.httpStatus===200&&diagnostics.slackError==='file_not_found'){
+          // Unavailable is not deleted or unshared everywhere. Requests still authorize
+          // the source/root on every use; preserve links and credentials for reshare.
+          unshareVisibilityUnavailable();return;
+        }
+        throw error;
+      }
+    }
     for(const [id,card] of await this.store.list<CloudCard>('cards'))if((card.fileId===fileId||card.rootFileId===fileId)&&!keep?.has(card.actor.channelId)){
       await this.store.atomic<CloudCard,void>('cards',id,current=>({value:current?{...current,removed:true}:undefined,result:undefined}));await this.sessions.invalidate(id);
     }

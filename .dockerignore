@@ -19,3 +19,7 @@
 
 !site/
 !site/**
+
+# One verified selected engine source archive, never the local cache tree.
+!.cache/
+!.cache/studio.tar

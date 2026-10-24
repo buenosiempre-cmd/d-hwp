@@ -9,17 +9,33 @@ const exporter=resolve('scripts/export-pages.mjs');
 test('Pages public site is opt-in, links only the deployment API and publishes no document or secret files',async()=>{
  const cwd=await mkdtemp(join(tmpdir(),'rhwp-public-site-'));
  try{
+  const version='a'.repeat(64);
   await mkdir(join(cwd,'dist/editor'),{recursive:true});await mkdir(join(cwd,'dist/studio'),{recursive:true});
-  const shell='<meta name="rhwp-api-origin" content="">',program='public program';
+ const program=`<script src="/static/${version}/studio/theme-init.js"></script><script src="/static/${version}/studio/locale-init.js"></script><script type="module" src="/static/${version}/studio/assets/app.js"></script>`;
+ const shell='<meta name="rhwp-api-origin" content="">';
   await writeFile(join(cwd,'dist/editor/index.html'),shell);await writeFile(join(cwd,'dist/studio/index.html'),program);
   await writeFile(join(cwd,'dist/.env'),'must never be public');await writeFile(join(cwd,'dist/source.hwp'),'private document');
-  const version='a'.repeat(64);
-  await writeFile(join(cwd,'dist/static-manifest.json'),JSON.stringify({version,files:{'studio/index.html':{identity:{file:'studio/index.html',etag:'"'+createHash('sha256').update(program).digest('hex')+'"'}}}}));
+  const record={identity:{file:'studio/index.html',etag:'"'+createHash('sha256').update(program).digest('hex')+'"'}};
+  // More than 100 program paths must not exhaust the Pages header rule budget.
+  const programFiles={'studio/index.html':record,...Object.fromEntries(Array.from({length:120},(_,i)=>[`studio/assets/chunk-${i}.js`,record]))};
+  await mkdir(join(cwd,'studio'),{recursive:true});
+  const members={};
+  for(const name of ['theme-init.js','locale-init.js']){
+   const bytes='/* '+name+' */';const digest=createHash('sha256').update(bytes).digest('hex');
+   await writeFile(join(cwd,'dist/studio',name),bytes);
+   members['rhwp-studio/public/'+name]={size:Buffer.byteLength(bytes),sha256:digest};
+   programFiles['studio/'+name]={identity:{file:'studio/'+name,etag:'"'+digest+'"'}};
+  }
+  await writeFile(join(cwd,'studio/source-files.json'),JSON.stringify({members}));
+  await writeFile(join(cwd,'dist/static-manifest.json'),JSON.stringify({version,files:programFiles}));
   const run=(...args)=>execFileSync(process.execPath,[exporter,...args],{cwd,encoding:'utf8',stdio:'pipe'});
   run('https://api.example.test');
   await assert.rejects(readFile(join(cwd,'dist/pages/index.html')),{code:'ENOENT'});
   assert.match(await readFile(join(cwd,'dist/pages/robots.txt'),'utf8'),/Disallow: \/\n/);
-  assert.ok(!(await readFile(join(cwd,'dist/pages/_headers'),'utf8')).includes('media-src'));
+  const internalHeaders=await readFile(join(cwd,'dist/pages/_headers'),'utf8');
+  assert.ok(!internalHeaders.includes('media-src'));
+  assert.equal(internalHeaders.trimEnd().split('\n\n').length,6);
+  assert.ok(internalHeaders.includes('/static/*\n  Cache-Control: public, max-age=31536000, immutable'));
   run('https://api.example.test','--public-site');
   const root=join(cwd,'dist/pages'),files=await readdir(root,{recursive:true});
   assert.ok(files.includes('privacy/index.html'));assert.ok(files.includes('guide/index.html'));assert.ok(files.includes('support/index.html'));
@@ -55,12 +71,24 @@ test('Pages public site is opt-in, links only the deployment API and publishes n
   assert.match(headers,/connect-src 'self' https:\/\/api.example.test/);
   assert.match(headers,/media-src 'self'(?:;|\n)/);
   assert.match(headers,/default-src 'none'/);
+  assert.equal(headers.trimEnd().split('\n\n').length,18);
+  assert.ok(!headers.includes('/static/'+version));
+  assert.ok(files.includes(`static/${version}/studio/assets/chunk-119.js`));
+  assert.equal(await readFile(join(root,'locale-init.js'),'utf8'),await readFile(join(root,`static/${version}/studio/locale-init.js`),'utf8'));
+  const privacy=await readFile(join(root,'privacy/index.html'),'utf8');
+  const privacySource=await readFile(new URL('../../site/privacy/index.html',import.meta.url),'utf8');
+  assert.equal(privacy,privacySource.replaceAll('{{INSTALL_URL}}','https://api.example.test/install'));
   assert.ok(files.includes('assets/demo/rhwp-slack-20260926.mp4'));
   assert.ok(files.includes('assets/demo/rhwp-slack-20260926.jpg'));
   assert.ok(!headers.split('\n\n')[0].includes('X-Robots-Tag'));
   assert.match(headers,/\/editor\/\*\n  Cache-Control: no-cache\n  X-Robots-Tag: noindex, nofollow/);
   assert.match(await readFile(join(root,'editor/index.html'),'utf8'),/content="https:\/\/api.example.test"/);
+  await writeFile(join(root,'output-marker'),'preserve on invalid input');
   assert.throws(()=>run('https://api.example.test/unsafe','--public-site'));
   assert.throws(()=>run('http://api.example.test','--public-site'));
+  assert.throws(()=>run('https://api.example.test\n','--public-site'));
+  await writeFile(join(cwd,'dist/studio/locale-init.js'),'tampered');
+  assert.throws(()=>run('https://api.example.test','--public-site'));
+  assert.equal(await readFile(join(root,'output-marker'),'utf8'),'preserve on invalid input');
  }finally{await rm(cwd,{recursive:true,force:true});}
 });

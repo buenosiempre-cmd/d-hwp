@@ -67,6 +67,43 @@ rhwp for Slack은 직접 호스팅하여 무료로 제공합니다. 후원은 �
 - [조직 인프라에서 자체 호스팅](docs/self-hosting.md) — Slack 앱·Cloud Run·Pages 구성. 새 조직의 빈 계정에서 재현 검증은 아직 남아 있습니다.
 - [개발 문서](docs/README.md) — 로컬 실행, 구조, 배포와 의존성 안내.
 
+## 소스 빌드 입력
+
+현재 제품 소스는 core/editor/Studio **0.8.7**을 사용합니다. Node **24.21.0**, npm **11.19.0**, Python 3과 `package-lock.json`의 고정 의존성으로 빌드합니다.
+
+Studio 입력은 [고정 upstream commit](https://github.com/edwardkim/rhwp/tree/1a76570e833917d15817415a53c09ad61ab3203f)의 허용된 소스·폰트·라이선스로 만든 `.cache/studio.tar`입니다. `studio/upstream.json`의 SHA-256 `75e7c505045b171f4e90bb28959dd1c5be35baa17deac0a9133fd395e32ee055`와 일치해야 합니다. 일반 GitHub 전체 다운로드 tarball이나 `git archive` 출력과는 다른, 경로 정렬·uid/gid/mtime 0·원본 mode의 GNU tar 입력입니다. 원본 문서·샘플 문서·변환 결과는 입력에서 제외합니다.
+
+```sh
+# 고정 source manifest의 허용 입력만 받아 검증합니다.
+python3 scripts/prepare-studio-archive.py
+npm ci --ignore-scripts --no-audit --no-fund
+npm run typecheck
+npm run test:slack
+npm run test:security
+npm run build
+```
+
+`prepare:studio`는 archive가 없으면 Python 도구로 고정 source만 내려받고 각 파일과 최종 archive hash를 검사합니다. 기존 입력의 hash가 다르면 실패하며 원본 엔진 저장소를 clone/fetch하지 않습니다. 이 준비 단계에는 upstream HTTPS 접근이 필요합니다. Studio 내부 의존성은 archive의 lockfile로 설치하며 라이선스는 [제3자 고지](THIRD_PARTY_NOTICES.md)를 따릅니다. 기존 개발 문서의 0.8.6·자동 source fetch 설명보다 이 버전의 `package-lock.json`과 `studio/upstream.json`을 우선합니다.
+
+## Pages 정적 출력
+
+빌드 뒤 API의 정확한 HTTPS origin을 지정하면 `dist/pages`에 정적 배포 입력을 만듭니다. `--public-site`를 추가하면 홈페이지·사용 안내·개인정보 안내와 라이선스 페이지도 포함합니다. 출력 위치는 `dist/pages`로 고정되며, 실행할 때 이 디렉터리를 새로 생성합니다.
+
+```sh
+node scripts/export-pages.mjs https://api.example.test
+node scripts/export-pages.mjs https://api.example.test --public-site
+```
+
+`_headers`는 공통 생성기를 사용합니다. `/static/*`의 프로그램 자산은 1년 immutable 캐시를 적용하고, editor는 재검증(`no-cache`), API 경로와 404는 저장 금지(`no-store`)로 설정합니다. CSP의 API origin과 공개 사이트의 media 허용도 함께 생성합니다.
+
+이미 열린 편집기의 이전 자산을 유지하려면 검증된 과거 `/static/<namespace>/` 프로그램 파일을 새 배포 입력에 함께 보존해야 합니다. 공통 `/static/*` 규칙은 여러 namespace에 적용되므로 파일 수에 따라 헤더 규칙이 늘어나지 않습니다. exporter는 현재 build manifest의 자산만 복사하며 과거 배포를 자동으로 수집하지 않습니다. 과거 파일을 합칠 때는 경로·내용 hash와 라이선스를 확인하고, 환경 파일·인증 정보·사용자 문서를 포함하지 않습니다.
+
+헤더만 별도로 생성할 수도 있습니다. 이 명령은 파일을 수정하지 않고 stdout에 출력합니다.
+
+```sh
+node scripts/pages-headers.mjs --api-origin https://api.example.test --public-site
+```
+
 ## 기여와 커뮤니티
 
 오류 제보·문서 개선·코드 기여는 [기여 안내](CONTRIBUTING.md)를 참고하세요. 참여 시 [행동 강령](CODE_OF_CONDUCT.md)을 지켜 주세요. 보안 취약점은 공개 이슈 대신 [보안 정책](SECURITY.md)의 비공개 경로로 알려 주세요.
@@ -76,3 +113,5 @@ rhwp for Slack은 직접 호스팅하여 무료로 제공합니다. 후원은 �
 이 앱의 자체 코드와 문서는 [MIT License](LICENSE)로 제공합니다. 외부 엔진·라이브러리·폰트는 각 원저작자의 라이선스가 적용됩니다. [제3자 고지](THIRD_PARTY_NOTICES.md)를 함께 확인하세요.
 
 rhwp는 독립적으로 운영되는 서비스이며 Slack 또는 한글과컴퓨터의 공식 제품이 아닙니다. 화면·영상에 포함된 외부 제품의 상표·로고·문서는 앱 코드의 MIT 허용 범위와 구분됩니다.
+
+Studio 초기화 스크립트는 고정 소스 목록에 포함하며 빌드 시 내용과 동기 실행 순서를 검사합니다. Pages export는 버전 경로의 `studio/locale-init.js`와 같은 내용을 `/locale-init.js`에도 출력해 이전 HTML 참조를 유지합니다. 루트 호환 파일은 `no-cache`, 버전 파일은 immutable 정책을 사용합니다.
