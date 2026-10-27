@@ -17,7 +17,7 @@ for (const extension of ['hwp', 'hwpx']) {
     writeFileSync(`test-results/preview-${extension}.pdf`, pdf);
     // Old shared entry URLs preserve their fragment through the redirect, then consume it.
     await page.goto(`/viewer/#document=${id}`);
-    await expect(page).toHaveTitle(`viewer-two-pages.${extension} · rhwp`, {timeout:60_000});
+    await expect(page).toHaveTitle(`viewer-two-pages.${extension} · D-HWP`, {timeout:60_000});
     expect(new URL(page.url()).pathname).toBe('/editor/');
     expect(await page.evaluate(() => location.hash)).toBe('');
     expect(await page.evaluate(() => window.__studio.pageCount())).toBe(2);
@@ -25,7 +25,7 @@ for (const extension of ['hwp', 'hwpx']) {
     await expect(page.locator('#host, #pdf-canvas, #save')).toHaveCount(0);
     await expect(page.locator('#file')).toBeHidden();
     await page.evaluate(() => window.__studio.hwpctrl.call('SetTextFile', ['편집 중', 'TEXT', '']));
-    await expect(page).toHaveTitle(`* viewer-two-pages.${extension} · rhwp`);
+    await expect(page).toHaveTitle(`* viewer-two-pages.${extension} · D-HWP`);
     await expect(page.locator('#status')).toHaveText('저장하지 않은 변경 있음');
     // An unsaved edit cannot mutate the prepared original PDF.
     expect(await (await request.get(`/api/dev/documents/${id}/pdf`)).body()).toEqual(pdf);
@@ -46,17 +46,17 @@ test('direct editor uses full height, dev tools are opt-in, and dirty state surv
   page.on('request', r => {if (r.url().includes('/api/dev/documents')) conversions.push(r.url());});
   const name = '21868765_별표2_보건소_분장사무_매우긴문서이름_'.repeat(5) + '.hwp';
   await page.locator('#file').setInputFiles({name, mimeType:'application/octet-stream', buffer:readFileSync('tests/fixtures/viewer-two-pages.hwp')});
-  await expect(page).toHaveTitle(`${name} · rhwp`);
+  await expect(page).toHaveTitle(`${name} · D-HWP`);
   await expect(page.locator('#local')).toBeHidden();
   expect(await page.locator('#editor iframe').boundingBox()).toMatchObject({x:0, y:0, width:400, height:800});
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(400);
   expect(conversions).toEqual([]); // Editor entry does not wait for PDF generation.
   await page.evaluate(() => window.postMessage({type:'rhwp-slack:dirty', dirty:true}, location.origin));
-  await expect(page).toHaveTitle(`${name} · rhwp`);
+  await expect(page).toHaveTitle(`${name} · D-HWP`);
   const ui = page.frameLocator('#editor iframe');
   const input = ui.getByLabel('문서 편집 입력', {exact:true});
   await input.focus(); await input.pressSequentially('Edit ');
-  await expect(page).toHaveTitle(`* ${name} · rhwp`);
+  await expect(page).toHaveTitle(`* ${name} · D-HWP`);
   await expect(page.locator('#status')).toHaveText('저장하지 않은 변경 있음');
   expect(await page.evaluate(() => window.__studio.getDocumentState())).toMatchObject({dirty:true});
   await page.screenshot({path:'test-results/editor-long-name.png'});

@@ -5,6 +5,7 @@ public/
 .env.*
 !.env.example
 test-results/
+test-results-desk/
 playwright-report/
 .DS_Store
 *.hwp

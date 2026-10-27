@@ -17,6 +17,8 @@
     ]
   },
   "include": [
+    "src/assistant/**/*.ts",
+    "src/desk/**/*.ts",
     "src/shared/**/*.ts",
     "studio/adapters/**/*.ts",
     "src/editor/**/*.ts"
