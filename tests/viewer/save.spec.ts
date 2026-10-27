@@ -16,7 +16,7 @@ async function session(page:Page,format='hwp'){
   });
   await page.goto(origin+'/editor/#ticket='+ticket);
   await expect(page.locator('#save-to-slack')).toBeVisible({timeout:60_000});
-  await expect(page).toHaveTitle(`문서.${format} · rhwp`);
+  await expect(page).toHaveTitle(`문서.${format} · D-HWP`);
   expect(new URL(page.url()).hash).toBe('');
   expect(await page.evaluate(()=>Object.hasOwn(window,'__studio'))).toBe(false);
   return requests;
@@ -62,7 +62,7 @@ for(const format of ['hwp','hwpx'])test(`${format}: production save keeps edits 
   const document=new HwpDocument(uploads[0].bytes);const text=document.getTextFileText();document.free();
   expect(text).toContain('Before save');expect(text).not.toContain('After save');
   await page.locator('#save-to-slack').click();await expect.poll(()=>uploads.length).toBe(2);
-  await expect(page).toHaveTitle(`문서.${format} · rhwp`);expect(uploads[0].id).not.toBe(uploads[1].id);
+  await expect(page).toHaveTitle(`문서.${format} · D-HWP`);expect(uploads[0].id).not.toBe(uploads[1].id);
   await page.setViewportSize({width:669,height:863});await expect(page.locator('#host')).toHaveCount(0);
   expect(await page.locator('#editor iframe').boundingBox()).toMatchObject({x:0,y:0,width:669,height:863});
   const storage=await page.evaluate(()=>JSON.stringify({local:{...localStorage},session:{...sessionStorage}}));expect(storage).not.toContain(bearer);expect(storage).not.toContain(ticket);

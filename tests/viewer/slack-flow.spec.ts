@@ -21,7 +21,7 @@ test('production HTTP ticket → real Studio edit → isolated validation → Sl
     const preview=object(object(object(metadata.entity_payload).attributes).full_size_preview);
     await phase('open-original',async()=>{await page.goto(String(preview.preview_url));await expect(page.locator('#save-to-slack')).toBeVisible({timeout:60_000});});
     const input=page.frameLocator('#editor iframe').getByLabel('문서 편집 입력',{exact:true});await input.focus();await input.pressSequentially('Saved revision ');
-    await phase('save-revision',async()=>{await expect(page).toHaveTitle(/^\* /);await page.locator('#save-to-slack').click();await expect(page).toHaveTitle('문서.hwp · rhwp',{timeout:60_000});});
+    await phase('save-revision',async()=>{await expect(page).toHaveTitle(/^\* /);await page.locator('#save-to-slack').click();await expect(page).toHaveTitle('문서.hwp · D-HWP',{timeout:60_000});});
     await phase('revision-pdf',async()=>{await expect(page.locator('#slack-save p')).toHaveText('편집본과 PDF를 Slack에 저장했습니다.',{timeout:60_000});await runtime.documents!.pdf.idle();});
     const completions=api.calls.filter(c=>c.method==='files.completeUploadExternal');expect(completions).toHaveLength(7);
     for(const call of completions){expect(call.args.channel_id).toBeUndefined();expect(call.args.thread_ts).toBeUndefined();}
@@ -41,7 +41,7 @@ test('production HTTP ticket → real Studio edit → isolated validation → Sl
     await page.goto('about:blank'); // Opening another Work Object creates a fresh embed.
     await page.goto(String(revisionPreview.preview_url));
     await expect(page.locator('#save-to-slack')).toBeVisible({timeout:60_000});
-    await expect(page).toHaveTitle('문서_편집본_1.hwp · rhwp');
+    await expect(page).toHaveTitle('문서_편집본_1.hwp · D-HWP');
     });
     const pngFile=[...api.files.values()].find(f=>String(f.name).endsWith('_편집본_1_01페이지.png'))!;
     const png=uploaded.get(String(pngFile.id))!;expect(png.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');writeFileSync(testInfo.outputPath('slack-edited-thumbnail.png'),png);
