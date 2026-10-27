@@ -60,6 +60,7 @@ GitHub Issue: [#3](https://github.com/buenosiempre-cmd/d-hwp/issues/3)
 - [Stage 1](../working/task_m001_3_stage1.md): 계약·SDK 연결과 원문 보존.
 - [Stage 2](../working/task_m001_3_stage2.md): API·UI·권한·경합·취소.
 - [Stage 3](../working/task_m001_3_stage3.md): 전체 회귀·실제 조회·게시 준비.
+- [Stage 3.1](../working/task_m001_3_stage3.1.md): 원격 컨테이너 검증용 서버 스크립트 누락 보완. 임시 파일 구성에서 실패·수정 후 통과를 재현했으며 최신 PR CI에서 전체 이미지를 재검증한다.
 
 실연결은 개인정보 없는 합성 업무 조건과 공개 규정만 사용했다. 실제 확인한 제999조 미존재, 검색 partial, 재무 needs_input, 제3조 개정본 3350 조회는 서로 다른 상태로 표시한다. 제3조 조회 성공은 업무 적용이나 지급 승인 판정이 아니다. 한국법령은 이 시나리오에서 not_requested다.
 
