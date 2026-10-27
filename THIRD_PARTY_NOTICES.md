@@ -23,6 +23,7 @@ rhwp for Slack의 자체 코드·문서에는 MIT License를 적용합니다. �
 | google-auth-library | 11.1.0 | Apache-2.0 | [Google Cloud Node](https://github.com/googleapis/google-cloud-node) |
 | @playwright/test | 1.63.0 | Apache-2.0 | [Playwright](https://github.com/microsoft/playwright) |
 | @slack/bolt | 5.1.0 | MIT | [Bolt for JavaScript](https://github.com/slackapi/bolt-js) |
+| @modelcontextprotocol/sdk | 1.32.1 | MIT | [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) |
 | jose | 6.2.12 | MIT | [jose](https://github.com/panva/jose) |
 | tsx | 4.23.13 | MIT | [tsx](https://github.com/privatenumber/tsx) |
 
