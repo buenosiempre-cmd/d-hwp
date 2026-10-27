@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ko">
-<head><meta name="rhwp-api-origin" content=""><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>문서 편집 · rhwp</title></head>
+<head><meta name="rhwp-api-origin" content=""><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>문서 편집 · D-HWP</title></head>
 <body data-state="loading">
   <main id="editor" aria-label="문서 편집기"></main>
   <section id="notice" aria-label="문서 상태">
@@ -11,6 +11,11 @@
       <p>개발용 문서는 Slack에 저장되지 않습니다.</p>
     </div>
   </section>
+  <button id="dhwp-toggle" type="button" aria-expanded="false" aria-controls="dhwp-assistant" hidden>D-HWP · AI 업무 도우미</button>
+  <aside id="dhwp-assistant" aria-label="D-HWP AI 업무 도우미" hidden>
+    <div class="dhwp-assistant-heading"><strong>D-HWP · 동국 한글문서 도우미</strong><button id="dhwp-close" type="button" aria-label="업무 도우미 닫기">닫기</button></div>
+    <div id="dhwp-assistant-body"></div>
+  </aside>
   <script type="module" src="/main.ts"></script>
 </body>
 </html>

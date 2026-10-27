@@ -1,5 +1,5 @@
 {
-  "name": "rhwp-slack",
+  "name": "d-hwp",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,6 +9,10 @@
   },
   "packageManager": "npm@11.19.0",
   "scripts": {
+    "desk": "npm run build:desk && node scripts/serve-desk.mjs",
+    "serve:desk": "node scripts/serve-desk.mjs",
+    "build:desk": "npm run build && node scripts/build-desk.mjs",
+    "test:desk": "playwright test --config playwright.desk.config.ts",
     "dev": "npm run build:dev && node scripts/serve-viewer.mjs --dev",
     "build": "npm run prepare:studio && node scripts/build-studio.mjs && node scripts/build-host.mjs",
     "build:dev": "npm run prepare:studio && node scripts/build-studio.mjs && node scripts/build-host.mjs --dev",

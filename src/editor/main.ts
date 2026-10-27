@@ -1,8 +1,9 @@
-import { createStudio, type RhwpEditor } from '@rhwp/editor';
+import { createStudio, type RhwpEditor, type RhwpDocumentStateV1 } from '@rhwp/editor';
 import { validateInput, MAX_PAGES, MAX_FILE_BYTES } from '../shared/errors';
 import {attachSave} from './save';
 import {Startup} from './startup';
 import {EditorApiError,reconnectEditor,deliverReconnect,sameIdentity,type EditorIdentity} from './reconnect';
+import {mountAssistant} from '../assistant/panel';
 import './style.css';
 
 const status = document.querySelector<HTMLElement>('#status')!;
@@ -32,23 +33,59 @@ async function api(path: string, init: RequestInit = {},token=bearer): Promise<R
 let studio: RhwpEditor;
 let busy = false;
 let documentName = '';
+let assistantSnapshot:RhwpDocumentStateV1|undefined;
+const assistantPanel=document.querySelector<HTMLElement>('#dhwp-assistant')!;
+const assistantToggle=document.querySelector<HTMLButtonElement>('#dhwp-toggle')!;
+const assistant=mountAssistant(document.querySelector<HTMLElement>('#dhwp-assistant-body')!,{
+  readDocument:async()=>{
+    if(busy||!studio||!documentName||document.body.dataset.state!=='ready')throw new Error('문서를 먼저 열어 주세요.');
+    const name=documentName;
+    const before=await studio.getDocumentState();
+    const text=await studio.hwpctrl.call('GetTextFile',['TEXT','']);
+    const after=await studio.getDocumentState();
+    if(name!==documentName||busy||before.documentEpoch!==after.documentEpoch||before.changeSeq!==after.changeSeq||before.documentSha256!==after.documentSha256)throw new Error('가져오는 동안 문서가 변경되었습니다. 다시 가져와 주세요.');
+    if(typeof text!=='string')throw new Error('문서 텍스트를 가져오지 못했습니다. 필요한 부분을 직접 붙여넣어 주세요.');
+    assistantSnapshot=after;
+    return {text,name};
+  },
+  isDocumentCurrent:async()=>{
+    if(!assistantSnapshot||busy||!studio||document.body.dataset.state!=='ready')return false;
+    const current=await studio.getDocumentState();
+    return assistantSnapshot.documentEpoch===current.documentEpoch&&assistantSnapshot.changeSeq===current.changeSeq&&assistantSnapshot.documentSha256===current.documentSha256;
+  },
+});
+function closeAssistant():void{
+  assistantPanel.hidden=true;assistantToggle.setAttribute('aria-expanded','false');assistantToggle.focus();
+}
+assistantToggle.addEventListener('click',()=>{
+  const open=assistantPanel.hidden;assistantPanel.hidden=!open;assistantToggle.setAttribute('aria-expanded',String(open));
+  if(open)document.querySelector<HTMLButtonElement>('#dhwp-close')!.focus();
+});
+document.querySelector('#dhwp-close')!.addEventListener('click',closeAssistant);
+assistantPanel.addEventListener('keydown',event=>{if(event.key==='Escape')closeAssistant();});
 
 function setStatus(message: string, state: 'loading' | 'empty' | 'ready' | 'error'): void {
   status.textContent = message;
   document.body.dataset.state = state;
   local.hidden = !devtools || state === 'ready' || state === 'loading';
+  assistantToggle.hidden=state!=='ready';
+  if(state!=='ready'){assistantPanel.hidden=true;assistantToggle.setAttribute('aria-expanded','false');}
 }
 function showError(error: unknown): void {
+  assistantSnapshot=undefined;
+  assistant.clear();
   setStatus(error instanceof Error ? error.message : '문서를 열지 못했습니다.', 'error');
 }
 function setDirty(dirty: boolean): void {
-  document.title = `${dirty ? '* ' : ''}${documentName} · rhwp`;
+  document.title = `${dirty ? '* ' : ''}${documentName} · D-HWP`;
   status.dataset.dirty = String(dirty);
   setStatus(dirty ? '저장하지 않은 변경 있음' : '변경 없음', 'ready');
 }
 async function load(bytes: Uint8Array, name: string): Promise<void> {
   if (busy) throw new Error('문서를 여는 중입니다.');
   validateInput(bytes);
+  assistantSnapshot=undefined;
+  assistant.clear();
   busy = true;
   input.disabled = true;
   mark('load-start');
@@ -94,6 +131,7 @@ async function initialize():Promise<void>{
         event.data?.type !== 'rhwp-slack:dirty' || typeof event.data.dirty !== 'boolean' ||
         busy || !documentName || document.body.dataset.state !== 'ready') return;
     setDirty(event.data.dirty);
+    if(event.data.dirty)assistant.notifyDocumentChanged();
   });
   if (sourceDocument) {
     const [meta,bytes]=sourceDocument;

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>D-HWP · 동국 한글문서 도우미</title>
+</head>
+<body data-state="empty">
+  <a class="skip-link" href="#workspace">작업실로 바로가기</a>
+  <header class="desk-header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">D</span><div><h1>D-HWP <span>동국 한글문서 도우미</span></h1><p>동국대학교 구성원을 위한 CoP 시제품</p></div></div>
+    <span class="local-badge"><span aria-hidden="true">●</span> 로컬 작업실</span>
+  </header>
+  <div class="desk-toolbar" aria-label="문서 작업">
+    <div class="file-actions">
+      <button id="open-file" type="button" class="primary">문서 열기</button>
+      <input id="file" type="file" accept=".hwp,.hwpx" aria-label="HWP 또는 HWPX 문서 선택" hidden>
+      <button id="download-document" type="button" disabled>현재 편집본 다운로드</button>
+      <button id="close-document" type="button" disabled>문서 닫기</button>
+    </div>
+    <div class="file-meta"><span id="document-name">열린 문서 없음</span><span id="page-count"></span></div>
+  </div>
+  <div class="workspace-status"><p id="desk-status" role="status" aria-live="polite">문서를 열거나, 업무 도우미에 텍스트를 붙여넣어 시작하세요.</p><span>HWP · HWPX / 20 MiB · 200페이지 이내</span></div>
+  <div class="mobile-tabs" role="tablist" aria-label="작업 화면">
+    <button id="document-tab" type="button" role="tab" aria-controls="document-pane" aria-selected="true">문서 편집</button>
+    <button id="assistant-tab" type="button" role="tab" aria-controls="assistant-pane" aria-selected="false" tabindex="-1">AI 업무 도우미</button>
+  </div>
+  <main id="workspace" class="workspace" tabindex="-1">
+    <section id="document-pane" class="document-pane" aria-label="문서 편집">
+      <div id="empty-document" class="empty-document">
+        <div class="empty-sheet" aria-hidden="true"><span>한글</span><i></i><i></i><i></i></div>
+        <p class="eyebrow">문서에서 다음 업무까지</p>
+        <h2>익숙한 한글 문서,<br>더 편리한 업무의 시작</h2>
+        <p>문서를 열고 편집한 뒤, 내용을 정리해<br>AI에 전달할 검토 요청문을 만들어 보세요.</p>
+        <ol class="start-steps"><li><b>01</b><span>문서 열기</span></li><li><b>02</b><span>내용 편집·확인</span></li><li><b>03</b><span>AI 요청문 준비</span></li></ol>
+        <button id="start-with-text" type="button" class="text-button">문서 없이 텍스트로 시작하기 <span aria-hidden="true">→</span></button>
+      </div>
+      <div id="desk-editor" aria-label="한글 문서 편집기" hidden></div>
+      <div id="loading-document" class="loading-document" hidden><span class="loader" aria-hidden="true"></span><p>문서를 여는 중입니다.</p><p>이 창 안에서 문서를 처리하고 있습니다.</p></div>
+    </section>
+    <aside id="assistant-pane" class="assistant-pane" aria-label="AI 업무 도우미"><div id="assistant"></div></aside>
+  </main>
+  <footer class="desk-footer"><p>문서와 요청문은 이 창의 메모리에서 처리됩니다. 자동 저장·AI 자동 전송은 하지 않습니다. 창을 닫기 전에 편집본을 내려받으세요.</p><p>RHWP 기반 · <a href="/licenses/MIT.txt" target="_blank" rel="noopener">라이선스</a> · <a href="/licenses/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener">오픈소스 고지</a></p></footer>
+  <script type="module" src="/main.ts"></script>
+</body>
+</html>

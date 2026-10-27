@@ -20,3 +20,10 @@ body[data-state=ready] #notice{position:absolute;left:0;top:0;transform:none;wid
 #reopen{max-width:380px;margin:12px 0 0;line-height:1.6}
 
 #slack-save #reconnect-slack,#slack-save #download-edits{margin:6px 0 0 6px;background:#394b5b}
+
+#dhwp-toggle{position:fixed;left:16px;bottom:44px;z-index:20;padding:11px 16px;border:1px solid #c5d8ce;border-radius:10px;color:#fff;background:#173f38;font:600 13px system-ui;cursor:pointer;box-shadow:0 3px 15px #0002}
+#dhwp-assistant{position:fixed;right:12px;top:12px;bottom:150px;z-index:30;width:min(420px,calc(100vw - 24px));overflow:auto;border:1px solid #c5d8ce;border-radius:14px;background:#f6f8f4;box-shadow:0 12px 50px #0003}
+.dhwp-assistant-heading{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:14px 16px;background:#173f38;color:#fff;font-size:13px}
+#dhwp-close{font:inherit;border:1px solid #b4cfc4;background:transparent;color:#fff;border-radius:6px;padding:5px 9px;cursor:pointer}
+#dhwp-assistant-body{padding:16px}
+@media(max-width:640px){#dhwp-toggle{left:8px;bottom:8px;padding:8px 10px;font-size:11px}#dhwp-assistant{top:8px;right:8px;bottom:110px;width:calc(100vw - 16px)}}
