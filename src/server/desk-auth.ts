@@ -39,6 +39,10 @@ export async function createDeskAuth({origin, authFile}: {origin: string; authFi
     return key;
   }
   function html(req: IncomingMessage, res: ServerResponse, status: number, message = '', logout = false) {
+    // A no-referrer document makes a native form POST use Origin: null.
+    // Keep the same-origin Origin header for CSRF validation without leaking
+    // a referrer to any different origin.
+    res.setHeader('Referrer-Policy','same-origin');
     res.writeHead(status, {'Content-Type':'text/html; charset=utf-8'}).end(req.method === 'HEAD' ? undefined : page(message, logout));
   }
   function json(res: ServerResponse, status: number, code: string) {
