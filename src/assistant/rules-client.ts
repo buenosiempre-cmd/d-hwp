@@ -9,7 +9,7 @@ export function createRulesHttpClient(url: string, options: () => RequestInit = 
       headers.set('Content-Type', 'application/json');
       const response = await fetch(url, {
         ...init, method: 'POST', body: JSON.stringify(request), headers,
-        credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
+        credentials: 'same-origin', cache: 'no-store', referrerPolicy: 'no-referrer',
         signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : []), ...(init.signal ? [init.signal] : [])]),
       });
       const value: unknown = await response.json();
