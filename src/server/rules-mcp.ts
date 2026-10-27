@@ -17,6 +17,7 @@ const MESSAGES: Record<string, string> = {
   INVALID_CONFIGURATION: '규정 MCP 서버 연결 설정을 확인하세요.',
   INVALID_REQUEST: '규정 요청 형식이나 입력 길이를 확인하세요.',
   CLOSED: '규정 연결이 종료되었습니다. 다시 연결한 뒤 요청하세요.',
+  CANCELLED: '규정 검토 요청을 취소했습니다.',
   BUSY: '규정 요청이 진행 중입니다. 잠시 뒤 다시 시도하세요.',
   FINANCE_DISABLED: '이 서버에서는 재무 검토 연결을 사용하지 않습니다.',
   TIMEOUT: '규정 조회 제한 시간을 초과했습니다. 잠시 뒤 다시 시도하세요.',
@@ -104,7 +105,7 @@ function result(request: RulesRequest, response: unknown): RulesReply {
 /** Credentials and destinations are read once, exclusively from server configuration. */
 export function createRulesMcp(env: NodeJS.ProcessEnv = process.env): {
   configured: boolean;
-  call(request: RulesRequest): Promise<RulesReply>;
+  call(request: RulesRequest, signal?: AbortSignal): Promise<RulesReply>;
   close(): Promise<void>;
 } {
   let config: Settings | null = null;
@@ -116,9 +117,10 @@ export function createRulesMcp(env: NodeJS.ProcessEnv = process.env): {
 
   return {
     configured: config !== null,
-    async call(input) {
+    async call(input, signal) {
       let request: RulesRequest;
       try { request = validateRulesRequest(input); } catch { return failure('INVALID_REQUEST'); }
+      if (signal?.aborted) return failure('CANCELLED');
       if (closed) return failure('CLOSED');
       if (!config) return failure(configurationError);
       if (request.operation === 'finance' && !financeEnabled) return failure('FINANCE_DISABLED');
@@ -130,13 +132,16 @@ export function createRulesMcp(env: NodeJS.ProcessEnv = process.env): {
       let finish!: () => void;
       const finished = new Promise<void>(resolve => { finish = resolve; });
       const stop = (reason: string) => { if (!controller.signal.aborted) { code = reason; controller.abort(); } };
+      const abortFromCaller = () => stop('CANCELLED');
       const operation = { abort: () => stop('CLOSED'), finished };
       active.add(operation);
       const timer = setTimeout(() => stop('TIMEOUT'), TIMEOUT_MS);
       const aborted = new Promise<never>((_, reject) => {
         controller.signal.addEventListener('abort', () => reject(new SafeFailure(code || 'CLOSED')), { once: true });
       });
+      signal?.addEventListener('abort', abortFromCaller, { once: true });
       try {
+        if (signal?.aborted) throw new SafeFailure('CANCELLED');
         if (config.mode === 'stdio') {
           transport = new StdioClientTransport({ command: config.command, args: config.args, env: config.env, stderr: 'ignore', maxBufferSize: MAX_RESPONSE_BYTES });
         } else {
@@ -168,6 +173,7 @@ export function createRulesMcp(env: NodeJS.ProcessEnv = process.env): {
         }
         const execute = async () => {
           await client.connect(transport!, { signal: controller.signal, timeout: TIMEOUT_MS });
+          controller.signal.throwIfAborted();
           return client.callTool({ name: TOOL_NAMES[request.operation], arguments: toolArguments(request) }, undefined, { signal: controller.signal, timeout: TIMEOUT_MS });
         };
         const reply = result(request, await Promise.race([execute(), aborted]));
@@ -177,6 +183,7 @@ export function createRulesMcp(env: NodeJS.ProcessEnv = process.env): {
         return failure(code || (error instanceof SafeFailure ? error.code : 'UPSTREAM_UNAVAILABLE'));
       } finally {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', abortFromCaller);
         // Closing the transport also terminates stdio children; no response,
         // child stderr or transport exception is logged or exposed to the UI.
         await client.close().catch(() => {});

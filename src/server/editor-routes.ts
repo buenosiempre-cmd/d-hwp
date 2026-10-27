@@ -9,13 +9,21 @@ export interface EditorSaves {save(s:Session,id:string,format:string,bytes:Buffe
 import {UserError,userMessage,object,denied} from './errors';
 import {MAX_FILE_BYTES} from '../shared/errors';
 import {traceEditor,type EditorOperation} from './cloud/telemetry';
+import {createRulesMcp} from './rules-mcp';
+import {createRulesHandler,type RulesInvoker} from './rules-api';
+let sharedRules:RulesInvoker|undefined;
+function slackRules():RulesInvoker{
+  if(process.env.DHWP_RULES_SLACK_ENABLED!=='true')return {call:async()=>({ok:false,error:{code:'SLACK_RULES_DISABLED',message:'Slack 규정 연결이 설정되지 않았습니다. 관리자가 MCP 접근 범위와 서버 설정을 확인해야 합니다.'}})};
+  return sharedRules??=createRulesMcp();
+}
 async function read(req:IncomingMessage,limit:number):Promise<Buffer>{
   if(Number(req.headers['content-length']??0)>limit)throw new UserError('size','파일이 너무 큽니다.');
   const chunks:Buffer[]=[];let size=0;const timer=setTimeout(()=>req.destroy(),30_000);
   try{for await(const chunk of req){const b=Buffer.from(chunk);size+=b.length;if(size>limit)throw new UserError('size','파일이 너무 큽니다.');chunks.push(b);}return Buffer.concat(chunks);}finally{clearTimeout(timer);}
 }
-export function editorRoutes(origin:string,documents:EditorDocuments,saves:EditorSaves,editorOrigin?:string,workspaceRouting=false) {
+export function editorRoutes(origin:string,documents:EditorDocuments,saves:EditorSaves,editorOrigin?:string,workspaceRouting=false,rulesService:RulesInvoker=slackRules()) {
   let reading=0;const serveStatic=staticAssets();
+  const handleRules=createRulesHandler(rulesService);
   const handle=async(req:IncomingMessage,res:ServerResponse,next:()=>void):Promise<void>=>{
     const path=new URL(req.url??'/',origin).pathname;
     if(req.method==='GET'&&/^\/documents\/[0-9a-f-]{36}$/.test(path)){res.writeHead(302,{Location:'/editor/','Cache-Control':'no-store','Referrer-Policy':'no-referrer'}).end();return;}
@@ -47,6 +55,9 @@ export function editorRoutes(origin:string,documents:EditorDocuments,saves:Edito
         }
         const match=/^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization??'');if(!match)denied();
         const s=await documents.sessions.require(match[1]);
+        if(path==='/api/editor/rules'){
+          await handleRules(req,res,async()=>{await documents.sessions.require(match[1]);await documents.authorize(s.cardId,s.actor);});return;
+        }
         if(path==='/api/editor/document'&&req.method==='GET'){
           const card=await documents.authorize(s.cardId,s.actor);json({name:card.name,format:/\.hwpx$/i.test(card.name)?'hwpx':'hwp',...(workspaceRouting?{identity:{cardId:s.cardId,...s.actor}}:{})});return;
         }

@@ -95,3 +95,26 @@
   .d-hwp-assistant__preview { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) { .d-hwp-assistant__button { transition: none; } }
+.d-hwp-rules { margin: 22px 0 26px; padding: 20px 15px; border: 1px solid #bacaba; border-radius: 12px; background: #f3f5eb; }
+.d-hwp-rules > .d-hwp-assistant__button { margin-top: 12px; }
+.d-hwp-rules .d-hwp-rules__status { margin-top: 10px; font-size: 12px; color: #456049; }
+.d-hwp-rules__status[data-tone="error"], .d-hwp-rules .d-hwp-rules__validation { color: #a12e20; }
+.d-hwp-rules .d-hwp-rules__validation { margin-top: 8px; font-size: 12px; }
+.d-hwp-rules__checkbox { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; font-size: 12px; line-height: 1.7; cursor: pointer; }
+.d-hwp-rules__checkbox input { flex: none; width: 17px; height: 17px; margin: 2px 0 0; accent-color: #173f38; }
+.d-hwp-rules__checkbox input:focus-visible, .d-hwp-rules summary:focus-visible, .d-hwp-rules a:focus-visible { outline: 3px solid #7a9b64; outline-offset: 3px; }
+.d-hwp-rules__transmission { min-height: 116px; background: #fffef9; font-size: 12px; }
+.d-hwp-rules__facts-more { margin-top: 14px; border-top: 1px solid #ced8c8; padding-top: 10px; }
+.d-hwp-rules__facts-more summary { font-size: 12px; font-weight: 650; cursor: pointer; }
+.d-hwp-rules__results:not(:empty) { margin-top: 20px; border-top: 1px solid #c4d0bc; padding-top: 17px; }
+.d-hwp-rules__result-title { margin: 0 0 10px; font-size: 14px; }
+.d-hwp-rules .d-hwp-rules__limit { margin: 8px 0; color: #76531a; font-size: 12px; }
+.d-hwp-rules .d-hwp-rules__meta { margin: 5px 0; font-size: 11px; color: #56634f; }
+.d-hwp-rules__source { display: inline-block; margin: 5px 0; color: #205e43; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+.d-hwp-rules__card { margin-top: 13px; padding: 13px; border: 1px solid #d4dccd; border-radius: 8px; background: #fffef9; font-size: 12px; }
+.d-hwp-rules h5 { margin: 10px 0 7px; font-size: 13px; }
+.d-hwp-rules__card h5 { margin-top: 0; }
+.d-hwp-rules__card p + p { margin-top: 5px; }
+.d-hwp-rules .d-hwp-rules__excerpt { max-height: 320px; overflow-y: auto; margin: 10px 0; padding: 9px; border-radius: 6px; background: #f3f3ec; white-space: pre-wrap; word-break: break-word; }
+.d-hwp-rules .d-hwp-rules__finding, .d-hwp-rules .d-hwp-rules__question { margin-top: 9px; font-size: 12px; }
+@media (max-width: 480px) { .d-hwp-rules { padding: 18px 12px; } }

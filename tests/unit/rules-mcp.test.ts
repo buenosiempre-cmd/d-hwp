@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createRulesMcp } from '../../src/server/rules-mcp.ts';
 import { validateRulesRequest, RULES_MAX_FACT_CHARS, RULES_FACT_KEYS, type RulesReply, type RulesRequest } from '../../src/shared/rules.ts';
 
@@ -208,4 +211,52 @@ test('a hanging HTTP tool call times out and closes its request', { timeout: 30_
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal(requestClosed, true);
   } finally { await adapter.close(); await fixture.close(); }
+});
+
+test('an already cancelled caller makes no upstream request',async()=>{
+  let requests=0;
+  const fixture=await httpFixture(()=>{},()=>{requests++;});
+  const adapter=createRulesMcp({DHWP_RULES_MCP_URL:fixture.url});
+  const controller=new AbortController();controller.abort(new Error('synthetic-token'));
+  try{
+    error(await adapter.call({operation:'status'},controller.signal),'CANCELLED');
+    assert.equal(requests,0);
+  }finally{await adapter.close();await fixture.close();}
+});
+
+test('caller cancellation closes a hanging HTTP request and permits a fresh lookup',{timeout:10_000},async()=>{
+  let started!:()=>void,closed!:()=>void,calls=0;
+  const called=new Promise<void>(resolve=>started=resolve);
+  const disconnected=new Promise<void>(resolve=>closed=resolve);
+  const fixture=await httpFixture((_request,response,body)=>{
+    if(++calls===1){response.on('close',closed);started();return;}
+    sendResult(response,body,{ok:true,tool:'get_service_info',data:{version:'synthetic'}});
+  });
+  const adapter=createRulesMcp({DHWP_RULES_MCP_URL:fixture.url});
+  const controller=new AbortController();
+  const pending=adapter.call({operation:'status'},controller.signal);
+  try{
+    await called;controller.abort(new Error('synthetic-token'));
+    error(await pending,'CANCELLED');
+    await disconnected;
+    assert.equal(data(await adapter.call({operation:'status'})).version,'synthetic');
+  }finally{controller.abort();await pending;await adapter.close();await fixture.close();}
+});
+
+test('caller cancellation terminates its stdio child before returning capacity',{timeout:10_000},async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'d-hwp-rules-cancel-'));
+  const marker=join(directory,'synthetic-child.pid');
+  const adapter=createRulesMcp({DHWP_RULES_MCP_COMMAND:process.execPath,DHWP_RULES_MCP_ARGS:JSON.stringify([fixture,'hang',marker])});
+  const controller=new AbortController();
+  const pending=adapter.call({operation:'status'},controller.signal);
+  try{
+    let pid=0;
+    for(let attempt=0;attempt<200;attempt++){
+      try{pid=Number(await readFile(marker,'utf8'));break;}catch{await new Promise(resolve=>setTimeout(resolve,10));}
+    }
+    assert.ok(pid>0,'synthetic MCP must start before testing in-flight cancellation');
+    controller.abort();
+    error(await pending,'CANCELLED');
+    assert.throws(()=>process.kill(pid,0),/ESRCH/,'cancelled child must be reaped before the call settles');
+  }finally{controller.abort();await pending;await adapter.close();await rm(directory,{recursive:true,force:true});}
 });

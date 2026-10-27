@@ -14,3 +14,16 @@ test('local desk exposes program and license files without upload or arbitrary p
   expect((await request.get('/licenses/MIT.txt')).status()).toBe(200);
   expect(await (await request.get('/licenses/THIRD_PARTY_NOTICES.md')).text()).toContain('rhwp');
 });
+
+test('MCP requests require the exact local origin and cannot choose a server or tool',async({request})=>{
+  const data={operation:'status'};
+  expect((await request.post('/api/assistant/rules',{data})).status()).toBe(403);
+  expect((await request.post('/api/assistant/rules',{data,headers:{Origin:'https://evil.example'}})).status()).toBe(403);
+  expect((await request.post('/api/assistant/rules',{data,headers:{Origin:'null'}})).status()).toBe(403);
+  const headers={Origin:'http://127.0.0.1:4175'};
+  expect((await request.post('/api/assistant/rules',{data:{operation:'exec',command:'sh'},headers})).status()).toBe(400);
+  const response=await request.post('/api/assistant/rules',{data,headers});
+  expect(response.status()).toBe(200);
+  expect(response.headers()['cache-control']).toBe('no-store');
+  expect(await response.json()).toMatchObject({ok:false,error:{code:'NOT_CONFIGURED'}});
+});

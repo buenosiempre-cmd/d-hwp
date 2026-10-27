@@ -2,12 +2,17 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { writeFile } from 'node:fs/promises';
 
 const mode = process.argv[2] || 'echo';
 const server = new Server({ name: 'd-hwp-synthetic-rules', version: '1.0.0' }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
 server.setRequestHandler(CallToolRequestSchema, async request => {
   const tool = request.params.name;
+  if (mode === 'hang') {
+    await writeFile(process.argv[3], String(process.pid));
+    await new Promise(() => {});
+  }
   if (mode === 'delay') await new Promise(resolve => setTimeout(resolve, 350));
   if (mode === 'malformed') return { content: [{ type: 'text', text: 'A prose answer is not a structured success.' }] };
   if (mode === 'error') return {
