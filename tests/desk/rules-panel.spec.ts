@@ -379,21 +379,26 @@ test('finance fact limit preserves the input and refuses sending an overlong ans
 });
 
 test('the real desk entry mounts the rules panel and calls its same-origin API only after consent', async ({page}) => {
-  const sent: {method: string; type: string | undefined; body: RulesRequest}[] = [];
+  const origin = 'https://desk.example.test';
+  const expectedCookie = '__Host-dhwp_session=synthetic-session';
+  const sent: {method: string; type: string | undefined; cookie: string | null; body: RulesRequest}[] = [];
   const unexpected: string[] = [];
-  await page.route('http://127.0.0.1:4175/**', async route => {
+  await page.context().addCookies([{name:'__Host-dhwp_session',value:'synthetic-session',url:origin,secure:true,httpOnly:true,sameSite:'Strict'}]);
+  await page.route(origin + '/**', async route => {
     const request = route.request();
-    if (request.url() === 'http://127.0.0.1:4175/desk/') {
+    if (request.url() === origin + '/desk/') {
       await route.fulfill({status: 200, contentType: 'text/html', body: deskHtml});
-    } else if (request.url() === 'http://127.0.0.1:4175/api/assistant/rules') {
-      sent.push({method: request.method(), type: request.headers()['content-type'], body: request.postDataJSON() as RulesRequest});
-      await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(citationReply())});
+    } else if (request.url() === origin + '/api/assistant/rules') {
+      const cookie = await request.headerValue('cookie');
+      sent.push({method: request.method(), type: request.headers()['content-type'], cookie, body: request.postDataJSON() as RulesRequest});
+      await route.fulfill({status: cookie === expectedCookie ? 200 : 401, contentType: 'application/json',
+        body: JSON.stringify(cookie === expectedCookie ? citationReply() : {ok:false,error:{code:'AUTH_REQUIRED',message:'합성 접속 인증이 필요합니다.'}})});
     } else {
       unexpected.push(request.url());
       await route.abort();
     }
   });
-  await page.goto('http://127.0.0.1:4175/desk/');
+  await page.goto(origin + '/desk/');
   await page.addScriptTag({content: deskBundle});
   await expect(page.getByRole('heading', {name: 'D-HWP 동국 한글문서 도우미'})).toBeVisible();
   await source(page).fill(citationText);
@@ -404,7 +409,7 @@ test('the real desk entry mounts the rules panel and calls its same-origin API o
   await runRules(page).click();
   await expect(page.getByText('제5조(합성 근거) 실존', {exact: false})).toBeVisible();
   expect(sent).toHaveLength(1);
-  expect(sent[0]).toMatchObject({method: 'POST', type: 'application/json', body: {operation: 'citations', text: citationText}});
+  expect(sent[0]).toMatchObject({method: 'POST', type: 'application/json', cookie: expectedCookie, body: {operation: 'citations', text: citationText}});
   expect(unexpected).toEqual([]);
   await include(page).check();
   await generate(page).click();

@@ -13,6 +13,8 @@
     "serve:desk": "node --env-file-if-exists=.env.desk.local scripts/serve-desk.mjs",
     "build:desk": "npm run build && node scripts/build-desk.mjs",
     "test:desk": "playwright test --config playwright.desk.config.ts",
+    "test:deployment": "node scripts/run-tests.mjs deployment",
+    "package:desk": "node scripts/package-desk.mjs",
     "dev": "npm run build:dev && node scripts/serve-viewer.mjs --dev",
     "build": "npm run prepare:studio && node scripts/build-studio.mjs && node scripts/build-host.mjs",
     "build:dev": "npm run prepare:studio && node scripts/build-studio.mjs && node scripts/build-host.mjs --dev",

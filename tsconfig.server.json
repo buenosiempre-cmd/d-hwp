@@ -17,6 +17,7 @@
     "src/server/**/*.ts",
     "tests/slack/**/*.ts",
     "tests/security/**/*.ts",
+    "tests/deployment/**/*.ts",
     "scripts/slack-preflight.ts",
     "scripts/migrate-cloud-state.ts"
   ],

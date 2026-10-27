@@ -21,6 +21,8 @@ jobs:
       - run: npm run test:viewer
       - run: node scripts/build-desk.mjs
       - run: npm run test:desk
+      - run: npm run test:deployment
+      - run: npm run package:desk
       - run: git diff --check
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
