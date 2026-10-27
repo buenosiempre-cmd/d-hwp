@@ -1,5 +1,6 @@
 import {createStudio, type RhwpEditor, type RhwpDocumentStateV1} from '@rhwp/editor';
 import {mountAssistant} from '../assistant/panel';
+import {createRulesHttpClient} from '../assistant/rules-client';
 import {captureSaveSnapshot} from '../editor/save-snapshot';
 import {MAX_FILE_BYTES, MAX_PAGES, validateInput} from '../shared/errors';
 import './style.css';
@@ -22,6 +23,7 @@ const sameSnapshot = (a: RhwpDocumentStateV1, b: RhwpDocumentStateV1): boolean =
   a.documentEpoch === b.documentEpoch && a.changeSeq === b.changeSeq && a.documentSha256 === b.documentSha256;
 
 const assistant = mountAssistant(get('#assistant'), {
+  rulesClient: createRulesHttpClient('/api/assistant/rules'),
   async readDocument() {
     const current = studio;
     const version = generation;

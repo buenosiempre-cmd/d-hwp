@@ -9,8 +9,8 @@
   },
   "packageManager": "npm@11.19.0",
   "scripts": {
-    "desk": "npm run build:desk && node scripts/serve-desk.mjs",
-    "serve:desk": "node scripts/serve-desk.mjs",
+    "desk": "npm run build:desk && npm run serve:desk",
+    "serve:desk": "node --env-file-if-exists=.env.desk.local scripts/serve-desk.mjs",
     "build:desk": "npm run build && node scripts/build-desk.mjs",
     "test:desk": "playwright test --config playwright.desk.config.ts",
     "dev": "npm run build:dev && node scripts/serve-viewer.mjs --dev",
@@ -29,6 +29,7 @@
   "dependencies": {
     "@google-cloud/firestore": "9.1.0",
     "@google-cloud/tasks": "7.1.1",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@playwright/test": "1.63.0",
     "@rhwp/core": "0.8.7",
     "@rhwp/editor": "0.8.7",

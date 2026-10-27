@@ -1,7 +1,7 @@
 # D-HWP 사용·개발 안내
 
 ## 제품 범위
-D-HWP는 RHWP for Slack을 기반으로 한 동국 한글문서 도우미 시제품이다. 문서 편집과 AI 요청문 준비를 제공한다. AI 답변·실제 지급/세무 판단·업무 자동승인 기능은 포함하지 않는다.
+D-HWP는 RHWP for Slack을 기반으로 한 동국 한글문서 도우미 시제품이다. 문서 편집, 규정 MCP 조회와 AI 요청문 준비를 제공한다. AI 답변·실제 지급/세무 판단·업무 자동승인 기능은 포함하지 않는다. [MCP 설정·사용 안내](d-hwp-mcp.md)를 참조한다.
 
 ## 두 실행 경로
 | 경로 | 진입 | 문서 처리 | 설정 |
@@ -9,7 +9,7 @@ D-HWP는 RHWP for Slack을 기반으로 한 동국 한글문서 도우미 시제
 | 로컬 작업실 | npm run desk → /desk/ | 브라우저 메모리, 사용자 직접 다운로드 | AI 키·Slack 로그인 불필요 |
 | Slack 편집기 | Slack 문서 카드 → /editor/ | 기존 인증 서버·변환 서버·Slack 저장소 | 기존 .env/앱 설치 설정 필요 |
 
-로컬 작업실 서버는 127.0.0.1에만 바인딩한다. 문서 업로드 API는 없으며 GET/HEAD로 프로그램 자산만 제공한다. CSP는 같은 출처의 프로그램·폰트·WASM 로딩만 허용한다. 문서와 요청문을 자동 전송하거나 localStorage/IndexedDB에 저장하지 않는다. 직접 복사·다운로드 후 다른 AI에 붙여넣는 행위는 사용자가 선택한 서비스의 처리 경로를 따른다.
+로컬 작업실 서버는 127.0.0.1에만 바인딩한다. 문서 파일 업로드 API는 없으며 프로그램 자산과 같은 출처의 규정 검토 API를 제공한다. 사용자가 전송 범위를 확인하고 규정 검토를 실행하면 텍스트·질문·사실관계가 MCP로 전달된다. 문서와 요청문을 자동 전송하거나 localStorage/IndexedDB에 저장하지 않는다. 직접 복사·다운로드 후 다른 AI에 붙여넣는 행위는 사용자가 선택한 서비스의 처리 경로를 따른다.
 
 ## 문서와 AI 요청문
 1. 파일을 열어 원문을 확인하고 필요한 부분을 수정한다.
@@ -27,7 +27,8 @@ D-HWP는 RHWP for Slack을 기반으로 한 동국 한글문서 도우미 시제
 - src/assistant/panel.ts: 가져오기·미리보기·출력·초기화. DOM 값은 textContent/value 사용.
 - src/desk/: 독립 로컬 작업실. 문서 교체·닫기·오류 시 기존 Studio와 패널 내용 정리.
 - src/editor/: 기존 Slack 인증·새 파일 저장을 유지하면서 업무 패널 연결.
-- scripts/build-desk.mjs, serve-desk.mjs: 별도 로컬 UI 빌드와 프로그램 자산만 제공하는 서버.
+- scripts/build-desk.mjs, serve-desk.mjs: 별도 로컬 UI 빌드와 프로그램 자산·규정 검토 API를 제공하는 서버.
+- src/shared/rules.ts, src/server/rules-mcp.ts, rules-api.ts: 요청 계약, 서버측 MCP client, 제한된 검토 API.
 
 core/editor/Studio 0.8.7은 고정한다. SDK GetTextFile('TEXT','')를 전체 추출에 사용하며 saveblock을 선택 텍스트 추출로 사용하지 않는다. 문서 상태(documentEpoch/changeSeq/SHA)를 재확인해 가져온 텍스트가 오래된 경우 요청문 생성/내보내기를 막는다.
 

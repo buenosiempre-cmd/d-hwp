@@ -4,6 +4,7 @@ import {attachSave} from './save';
 import {Startup} from './startup';
 import {EditorApiError,reconnectEditor,deliverReconnect,sameIdentity,type EditorIdentity} from './reconnect';
 import {mountAssistant} from '../assistant/panel';
+import {createRulesHttpClient} from '../assistant/rules-client';
 import './style.css';
 
 const status = document.querySelector<HTMLElement>('#status')!;
@@ -37,6 +38,7 @@ let assistantSnapshot:RhwpDocumentStateV1|undefined;
 const assistantPanel=document.querySelector<HTMLElement>('#dhwp-assistant')!;
 const assistantToggle=document.querySelector<HTMLButtonElement>('#dhwp-toggle')!;
 const assistant=mountAssistant(document.querySelector<HTMLElement>('#dhwp-assistant-body')!,{
+  rulesClient: createRulesHttpClient(apiOrigin+'/api/editor/rules',()=>({headers:{...(bearer?{Authorization:'Bearer '+bearer}:{}),...(workspace?{'X-Rhwp-Workspace':workspace}:{})},signal:startup?.signal})),
   readDocument:async()=>{
     if(busy||!studio||!documentName||document.body.dataset.state!=='ready')throw new Error('문서를 먼저 열어 주세요.');
     const name=documentName;

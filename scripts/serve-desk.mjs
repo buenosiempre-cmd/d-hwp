@@ -2,11 +2,15 @@ import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {resolve,extname,sep} from 'node:path';
 import {staticAssets} from '../src/server/static-assets.ts';
+import {createRulesMcp} from '../src/server/rules-mcp.ts';
+import {createRulesHandler} from '../src/server/rules-api.ts';
 
 const port=Number(process.env.PORT||4175);
 if(!Number.isInteger(port)||port<1||port>65535)throw new Error('Invalid PORT');
 const origin=`http://127.0.0.1:${port}`;
 const assets=staticAssets();
+const rules=createRulesMcp();
+const handleRules=createRulesHandler(rules);
 const mount=resolve('dist/desk');
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.json':'application/json'};
 createServer(async(req,res)=>{
@@ -15,9 +19,13 @@ createServer(async(req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Content-Security-Policy',`default-src 'none'; script-src ${origin} 'wasm-unsafe-eval'; worker-src ${origin} blob:; style-src ${origin} 'unsafe-inline'; font-src ${origin} data:; connect-src ${origin}; img-src ${origin} data: blob:; frame-src ${origin}; object-src 'none'; frame-ancestors ${origin}; base-uri 'none'; form-action 'none'`);
   if(req.headers.host!==new URL(origin).host){res.writeHead(403).end();return;}
-  if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405,{Allow:'GET, HEAD'}).end();return;}
   try{
-    const url=new URL(req.url,origin);
+    const url=new URL(req.url??'/',origin);
+    if(url.pathname==='/api/assistant/rules'){
+      if(req.headers.origin!==origin){res.writeHead(403).end();return;}
+      await handleRules(req,res);return;
+    }
+    if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405,{Allow:'GET, HEAD'}).end();return;}
     if(url.pathname==='/'||url.pathname==='/desk'){res.writeHead(302,{Location:'/desk/'}).end();return;}
     if(url.pathname.startsWith('/static/')){await assets(req,res,url.pathname);return;}
     const notices={'/licenses/MIT.txt':'LICENSE','/licenses/THIRD_PARTY_NOTICES.md':'THIRD_PARTY_NOTICES.md'};
@@ -30,5 +38,12 @@ createServer(async(req,res)=>{
     const bytes=await readFile(file);
     res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');
     res.end(req.method==='HEAD'?undefined:bytes);
-  }catch{res.writeHead(404).end();}
+  }catch(error){
+    if(res.destroyed||res.writableEnded)return;
+    if(res.headersSent){res.end();return;}
+    const code=error&&typeof error==='object'?'code' in error?error.code:undefined:undefined;
+    const status=code==='ERR_INVALID_URL'||error instanceof URIError?400:code==='ENOENT'||code==='ENOTDIR'?404:500;
+    const message=status===400?'올바르지 않은 요청입니다.':status===404?'요청한 파일을 찾지 못했습니다.':'요청을 처리하지 못했습니다.';
+    res.writeHead(status,{'Content-Type':'text/plain; charset=utf-8'}).end(message);
+  }
 }).listen(port,'127.0.0.1',()=>console.log(`D-HWP local desk: ${origin}/desk/`));

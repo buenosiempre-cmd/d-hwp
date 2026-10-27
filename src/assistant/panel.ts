@@ -1,10 +1,13 @@
 import { buildPrompt, MAX_CONTEXT_CHARS, MAX_NAME_CHARS, MAX_SOURCE_CHARS, safeDownloadName, TASKS, type TaskId } from './workflows';
+import { mountRulesPanel, type RulesPanel } from './rules-panel';
+import type { RulesClient } from '../shared/rules';
 import './panel.css';
 
 export interface AssistantOptions {
   readDocument?: () => Promise<{ text: string; name: string }>;
   /** Compare the editor state with the snapshot taken by readDocument. */
   isDocumentCurrent?: () => Promise<boolean>;
+  rulesClient?: RulesClient;
 }
 
 export interface AssistantPanel {
@@ -33,7 +36,9 @@ export function mountAssistant(container: HTMLElement, options: AssistantOptions
   const header = element('header', 'd-hwp-assistant__header');
   header.append(element('p', 'd-hwp-assistant__eyebrow', '동국 한글문서 도우미'), heading,
     element('p', 'd-hwp-assistant__intro', '문서의 내용을 정리하고, 업무에 맞는 검토를 준비하세요.'));
-  const privacy = element('p', 'd-hwp-assistant__privacy', '원문을 AI로 자동 전송하지 않습니다. 개인정보·민감정보를 확인하고 대학에서 허용한 AI에 요청문을 직접 입력하세요.');
+  const privacy = element('p', 'd-hwp-assistant__privacy', options.rulesClient
+    ? '원문을 AI로 자동 전송하지 않습니다. 규정 MCP에는 전송 범위를 확인하고 실행할 때만 내용을 보냅니다. AI 요청문은 내용을 확인한 뒤 대학에서 허용한 AI에 직접 입력하세요.'
+    : '원문을 AI로 자동 전송하지 않습니다. 개인정보·민감정보를 확인하고 대학에서 허용한 AI에 요청문을 직접 입력하세요.');
   root.append(header, privacy);
 
   function section(number: string, title: string): HTMLElement {
@@ -143,6 +148,7 @@ export function mountAssistant(container: HTMLElement, options: AssistantOptions
   let generation = 0;
   let imported = false;
   let stale = false;
+  let rulesPanel: RulesPanel | undefined;
   const downloads = new Map<string, ReturnType<typeof setTimeout>>();
 
   function announce(message: string, error = false): void {
@@ -173,14 +179,16 @@ export function mountAssistant(container: HTMLElement, options: AssistantOptions
     generate.disabled = reading || checking || stale || !source.value.trim() || sourceTooLong || contextTooLong;
     copy.disabled = checking || !preview.value;
     download.disabled = checking || !preview.value;
+    rulesPanel?.refresh();
   }
 
-  function invalidate(): boolean {
+  function invalidate(clearEvidence = true): boolean {
     const hadOutput = !!preview.value;
     preview.value = '';
     generation += 1;
     reading = false;
     checking = false;
+    if (clearEvidence) rulesPanel?.invalidate();
     return hadOutput;
   }
 
@@ -256,6 +264,9 @@ export function mountAssistant(container: HTMLElement, options: AssistantOptions
         if (result.name.length > MAX_NAME_CHARS) throw new Error(`문서명이 ${MAX_NAME_CHARS.toLocaleString('ko-KR')}자를 초과합니다. 내용을 직접 붙여넣고 짧은 문서명을 입력하세요.`);
         source.value = result.text;
         name.value = result.name;
+        // Consent may have been checked against the previous text while the
+        // asynchronous import was pending. The new source needs fresh consent.
+        rulesPanel?.invalidate();
         imported = true;
         stale = false;
         announce('문서의 전체 텍스트를 가져왔습니다. 공유할 내용을 확인하고 필요한 부분만 남기세요.');
@@ -277,12 +288,12 @@ export function mountAssistant(container: HTMLElement, options: AssistantOptions
 
   generate.addEventListener('click', () => {
     if (destroyed || reading || checking || stale) return;
-    invalidate();
+    invalidate(false);
     const token = generation;
     void (async () => {
       if (!await ensureCurrentDocument(token) || destroyed || token !== generation) return;
       try {
-        preview.value = buildPrompt({ task: task.value as TaskId, source: source.value, documentName: name.value, context: context.value });
+        preview.value = buildPrompt({ task: task.value as TaskId, source: source.value, documentName: name.value, context: context.value, evidence: rulesPanel?.getEvidence() });
         announce('요청문을 만들었습니다. 내용을 확인한 뒤 복사하거나 Markdown 파일로 저장하세요.');
       } catch (error) {
         announce(error instanceof Error ? error.message : '입력 내용을 확인해 주세요.', true);
@@ -337,6 +348,7 @@ export function mountAssistant(container: HTMLElement, options: AssistantOptions
     task.value = TASKS[0].id;
     imported = false;
     stale = false;
+    rulesPanel?.clear();
     for (const [url, timer] of downloads) { clearTimeout(timer); URL.revokeObjectURL(url); }
     downloads.clear();
     renderTask();
@@ -344,6 +356,20 @@ export function mountAssistant(container: HTMLElement, options: AssistantOptions
     announce('패널의 입력과 요청문을 모두 지웠습니다.');
   }
 
+  if (options.rulesClient) {
+    const rulesContainer = element('div');
+    root.insertBefore(rulesContainer, taskSection);
+    rulesPanel = mountRulesPanel(rulesContainer, prefix, {
+      client: options.rulesClient,
+      getSource: () => source.value,
+      ensureCurrent: async () => {
+        if (destroyed || reading || stale) return false;
+        const token = generation;
+        return await ensureCurrentDocument(token) && !destroyed && token === generation;
+      },
+      onChange: () => { invalidate(false); updateControls(); },
+    });
+  }
   reset.addEventListener('click', clear, { signal: listeners.signal });
   renderTask();
   updateControls();
@@ -362,6 +388,7 @@ export function mountAssistant(container: HTMLElement, options: AssistantOptions
     destroy() {
       if (destroyed) return;
       clear();
+      rulesPanel?.destroy();
       destroyed = true;
       listeners.abort();
       root.remove();
