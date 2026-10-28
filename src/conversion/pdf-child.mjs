@@ -5,6 +5,8 @@ import {workerData,parentPort} from 'node:worker_threads';
 import {once} from 'node:events';
 import {ConversionFailure} from './failures.mjs';
 import {markdownFromUnicode} from './markdown.mjs';
+import {textFromUnicode} from './text.mjs';
+import {normalizeSelectedPages} from './selection.mjs';
 import { resolve } from 'node:path';
 import {routeFont} from './font-routes.mjs';
 import { validateInput, MAX_PAGES } from '../shared/errors.ts';
@@ -21,28 +23,34 @@ async function frame(info,bytes){
   await output(length);await output(json);if(bytes)await output(bytes);
 }
 const {mode,start,end,module,fontManifest,fontBytes,print,browserWs}=workerData;
-if(!['pdf','preview','images','markdown'].includes(mode)||(['preview','images'].includes(mode)&&(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<1||end<start||end>10)))throw new Error('range');
+if(!['pdf','preview','images','selected','markdown','text'].includes(mode)||(['preview','images'].includes(mode)&&(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<1||end<start||end>10)))throw new Error('range');
 try {
+  const selectedPages=mode==='selected'?normalizeSelectedPages(workerData.selectedPages):undefined;
   const bytes=workerData.bytes;validateInput(bytes);
   begin('wasm_init');
   await init({module_or_path:module});
   begin('parse');
   doc=new HwpDocument(bytes);
   const count=doc.pageCount();pageCount=count;if(count<1||count>MAX_PAGES)throw new ConversionFailure('page_count');
-  if(mode==='markdown') {
-    begin('markdown');
-    const markdown=markdownFromUnicode(doc.getTextFileUnicode());
+  if(selectedPages?.some(page=>page>count))throw new ConversionFailure('page_selection');
+  if(mode==='markdown'||mode==='text') {
+    begin(mode);
+    const text=(mode==='text'?textFromUnicode:markdownFromUnicode)(doc.getTextFileUnicode());
     begin('output');
     await frame({type:'document',pageCount:count});
-    await frame({type:'markdown',bytes:markdown.length},markdown);
+    await frame({type:mode,bytes:text.length},text);
   } else {
   begin('svg_render');
+  const imageOnly=mode==='images'||mode==='selected';
+  const selected=selectedPages?new Set(selectedPages):undefined;
+  const last=selectedPages?.at(-1)??Math.min(end,count);
   const pages=[];
-  for(let i=0;i<(mode==='images'?Math.min(end,count):count);i++) {
+  for(let i=0;i<(imageOnly?last:count);i++) {
     // Preserve the preceding paper geometry for identical screenshot rounding on range retries.
     // Its document content need not be rendered again.
     pageNumber=i+1;operation='render_error';
-    const svg=mode==='images'&&i<start-1?'<svg xmlns="http://www.w3.org/2000/svg"/>':doc.renderPageSvgWithProfile(i,'print');svgBytes+=Buffer.byteLength(svg);
+    const blank=mode==='selected'?!selected.has(i+1):mode==='images'&&i<start-1;
+    const svg=blank?'<svg xmlns="http://www.w3.org/2000/svg"/>':doc.renderPageSvgWithProfile(i,'print');svgBytes+=Buffer.byteLength(svg);
     if(svgBytes>100*1024*1024)throw new ConversionFailure('svg_size');
     operation='page_info_error';
     const info=JSON.parse(doc.getPageInfo(i));
@@ -82,18 +90,18 @@ try {
   begin('fonts_ready');
   await page.evaluate(async()=>{await document.fonts.ready;await Promise.all([...document.images].map(img=>img.decode().catch(()=>{})));});
   begin('pdf');
-  const pdf=mode==='images'?Buffer.alloc(0):await page.pdf({preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
+  const pdf=imageOnly?Buffer.alloc(0):await page.pdf({preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
   if(pdf.length>50*1024*1024)throw new ConversionFailure('pdf_size');
   await frame({type:'document',pageCount:count});
-  if(mode!=='images')await frame({type:'pdf',bytes:pdf.length},pdf);
+  if(!imageOnly)await frame({type:'pdf',bytes:pdf.length},pdf);
   if(mode!=='pdf') {
     begin('png');
     let total=0;
-    for(let i=0;i<start-1;i++)await page.locator('.page').nth(i).evaluate(el=>{const rect=el.getBoundingClientRect();el.style.zoom=String(Math.min(1,800/rect.width,1200/rect.height));});
-    for(let number=start;number<=Math.min(end,count);number++){
+    for(let number=1;number<=last;number++){
       pageNumber=number;
       const element=page.locator('.page').nth(number-1);
       await element.evaluate(el=>{const rect=el.getBoundingClientRect();el.style.zoom=String(Math.min(1,800/rect.width,1200/rect.height));});
+      if(selected?!selected.has(number):number<start)continue;
       const png=await element.screenshot({type:'png',timeout:10_000});total+=png.length;
       if(png.length>5*1024*1024||total>25*1024*1024)throw new ConversionFailure('preview_size');
       await frame({type:'png',page:number,bytes:png.length},png);
