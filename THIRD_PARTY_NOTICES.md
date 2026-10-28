@@ -25,6 +25,8 @@ rhwp for Slack의 자체 코드·문서에는 MIT License를 적용합니다. �
 | @slack/bolt | 5.1.0 | MIT | [Bolt for JavaScript](https://github.com/slackapi/bolt-js) |
 | @modelcontextprotocol/sdk | 1.32.1 | MIT | [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) |
 | jose | 6.2.12 | MIT | [jose](https://github.com/panva/jose) |
+| saxes | 6.0.0 | ISC | [saxes](https://github.com/lddubeau/saxes) |
+| xmlchars (saxes 전이 의존성) | 2.2.0 | MIT | [xmlchars](https://github.com/lddubeau/xmlchars) |
 | tsx | 4.23.13 | MIT | [tsx](https://github.com/privatenumber/tsx) |
 
 서버·컨테이너 배포 시 패키지와 함께 제공되는 LICENSE·NOTICE를 유지합니다. Chromium 및 Node.js 배포물의 고지도 각 배포물에 포함된 조건을 따릅니다.
@@ -34,3 +36,7 @@ rhwp for Slack의 자체 코드·문서에는 MIT License를 적용합니다. �
 화면·영상에 보이는 Slack UI와 상표, rhwp 로고, 외부 기관 문서는 각 권리자의 자료입니다. 앱의 MIT License가 이들 자료에 대한 별도 권리를 부여한다는 뜻은 아닙니다. 자체 서비스로 배포할 때는 운영자·연락처·정책을 자신의 내용으로 바꾸고 사용할 자산의 조건을 확인하세요.
 
 앱의 라이선스와 서비스의 개인정보 처리·이용 안내는 서로 다른 문서입니다.
+
+## 독립 품질 비교 도구
+
+Kordoc 4.19.1 (MIT, [chrisryugj/kordoc](https://github.com/chrisryugj/kordoc))을 로컬 합성 문서 비교에 사용합니다. 운영 서버 의존성이 아니며 비교 실행 시 사용자가 별도로 설치한 모듈 경로를 명시합니다.

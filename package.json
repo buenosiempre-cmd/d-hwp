@@ -38,6 +38,7 @@
     "@slack/bolt": "5.1.0",
     "google-auth-library": "11.1.0",
     "jose": "6.2.12",
+    "saxes": "6.0.0",
     "tsx": "4.23.13"
   },
   "devDependencies": {
