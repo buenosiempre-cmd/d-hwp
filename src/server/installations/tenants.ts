@@ -13,7 +13,7 @@ interface Delivery {appId:string;teamId:string;generation:string;logicalId:strin
 const physicalId=(route:Delivery)=>createHash('sha256').update(JSON.stringify([route.appId,route.teamId,route.generation,route.logicalId])).digest('hex');
 export interface Tenant {installation:Installation;config:Config;documents:CloudApplication;events:CloudEvents;tasks:DurableTasks;identity:{botId:string;botUserId:string};}
 export interface TenantOptions {
-  config:Pick<Config,'signingSecret'|'appId'|'publicOrigin'|'editorOrigin'|'port'|'host'|'reactions'|'imageUploadConcurrency'>;
+  config:Pick<Config,'signingSecret'|'appId'|'publicOrigin'|'editorOrigin'|'port'|'host'|'reactions'|'imageUploadConcurrency'|'markdownOcr'>;
   installations:Installations;registry:MetadataStore;publisher:TaskPublisher;
   store:(installation:Installation)=>MetadataStore;
   api?:(credential:string)=>SlackApi;

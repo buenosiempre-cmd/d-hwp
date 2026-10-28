@@ -1,10 +1,18 @@
+import {isAbsolute} from 'node:path';
 export interface Config {
   signingSecret: string; botToken: string; appId: string; teamId: string;
   imageUploadConcurrency?:1|2; statePath?:string; adminIds?:ReadonlySet<string>; reactions?:boolean;
+  markdownOcr?:{modulePath:string;modelCachePath:string};
   editorOrigin?:string; editorMode?:'embed'|'browser';
   host?: '127.0.0.1'|'0.0.0.0'; publicOrigin?: string; workspaceHost: string; channelIds: ReadonlySet<string>; port: number;
 }
 export const ID = {team:/^T[A-Z0-9]{2,}$/, app:/^A[A-Z0-9]{2,}$/, user:/^[UW][A-Z0-9]{2,}$/, channel:/^[CG][A-Z0-9]{2,}$/, file:/^F[A-Z0-9]{2,}$/};
+export function loadMarkdownOcrConfig(env:NodeJS.ProcessEnv){
+  const modulePath=env.DHWP_KORDOC_MODULE?.trim(),modelCachePath=env.DHWP_KORDOC_MODEL_CACHE?.trim();
+  if(!modulePath&&!modelCachePath)return undefined;
+  if(!modulePath||!modelCachePath||![modulePath,modelCachePath].every(value=>isAbsolute(value)&&value.length<=4096&&!/[\u0000-\u001f\u007f]/.test(value)))throw new Error('DHWP_KORDOC_MODULE / DHWP_KORDOC_MODEL_CACHE 설정을 확인하세요.');
+  return {modulePath,modelCachePath};
+}
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const required = (key: string, pattern: RegExp): string => {
     const value = env[key]?.trim();
@@ -26,7 +34,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   let editorOrigin:string|undefined;
   if(env.EDITOR_ORIGIN){const editor=new URL(env.EDITOR_ORIGIN);if(editor.protocol!=='https:'||editor.username||editor.password||editor.pathname!=='/'||editor.search||editor.hash||editor.hostname.includes('*'))throw new Error('EDITOR_ORIGIN 설정을 확인하세요.');editorOrigin=editor.origin;}
   return {
-    editorOrigin,imageUploadConcurrency,
+    editorOrigin,imageUploadConcurrency,markdownOcr:loadMarkdownOcrConfig(env),
     host,publicOrigin:origin.origin, statePath:env.STATE_DB_PATH?.trim()||'.data/state.sqlite',
     adminIds:new Set((env.SLACK_ADMIN_USER_IDS??'').split(',').map(s=>s.trim()).filter(Boolean)),
     reactions:env.SLACK_REACTIONS_ENABLED==='true',

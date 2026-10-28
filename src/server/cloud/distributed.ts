@@ -1,3 +1,4 @@
+import {verifyOcrRuntime} from '../../conversion/ocr.mjs';
 import {createHash} from 'node:crypto';
 import {Firestore} from '@google-cloud/firestore';
 import {CloudTasksClient} from '@google-cloud/tasks';
@@ -18,6 +19,7 @@ import {loadDistributedConfig} from '../installations/config';
 const namespace=(prefix:string,values:string[])=>prefix+'-'+createHash('sha256').update(JSON.stringify(values)).digest('hex').slice(0,32);
 async function main(){try{
   const {config,oauth,role,keyId,keys,environment}=loadDistributedConfig();
+  if(config.markdownOcr)await verifyOcrRuntime(config.markdownOcr);
   const required=(name:string)=>{const value=process.env[name];if(!value)throw new Error('Missing cloud configuration');return value;};
   const projectId=required('GOOGLE_CLOUD_PROJECT'),db=new Firestore({projectId}),client=new CloudTasksClient({projectId});
   const registry=new FirestoreMetadata(db,namespace('r',[environment,config.appId]),'TREGISTRY');

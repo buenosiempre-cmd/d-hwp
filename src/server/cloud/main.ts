@@ -1,3 +1,4 @@
+import {verifyOcrRuntime} from '../../conversion/ocr.mjs';
 import {closeConversionRuntime} from '../../conversion/convert.mjs';
 import {runtimeId} from './telemetry';
 import {Firestore} from '@google-cloud/firestore';
@@ -14,7 +15,7 @@ import {workspaceWorker} from './workspace-worker';
 async function main(){try{
  const starting=Date.now();
  const required=(name:string)=>{const value=process.env[name];if(!value)throw new Error('Missing cloud setting');return value;};
- const config=loadConfig(),role=required('CLOUD_ROLE');if(!['ingress','worker'].includes(role))throw new Error('Invalid role');
+ const config=loadConfig(),role=required('CLOUD_ROLE');if(config.markdownOcr)await verifyOcrRuntime(config.markdownOcr);if(!['ingress','worker'].includes(role))throw new Error('Invalid role');
  const projectId=required('GOOGLE_CLOUD_PROJECT'),database=new Firestore({projectId}),store=new FirestoreMetadata(database,required('CLOUD_ENVIRONMENT'),config.teamId);
  const client=new CloudTasksClient({projectId}),publisher=new GoogleTaskPublisher(client,required('TASK_QUEUE'),required('WORKER_ORIGIN'),required('TASK_SERVICE_ACCOUNT'));
  const tasks=new DurableTasks(store,publisher),api=new HttpSlackApi(config.botToken);

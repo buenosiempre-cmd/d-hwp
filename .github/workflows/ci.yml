@@ -19,6 +19,7 @@ jobs:
       - run: npm run test:security
       - run: npm exec playwright install --with-deps chromium
       - run: npm run test:viewer
+      - run: npm run test:corpus
       - run: node scripts/build-desk.mjs
       - run: npm run test:desk
       - run: npm run test:deployment

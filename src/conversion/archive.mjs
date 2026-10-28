@@ -123,7 +123,7 @@ function read(input,cap){
 
 function outputPath(name){
   if(typeof name!=='string'||!validPath(name)||!/^[\x21-\x7e]+$/.test(name))return false;
-  return /^(?:document\.md|report\.json|source\/(?:original\.(?:hwp|hwpx)|structure\.hwpx)|assets\/[a-f0-9]{64}\.[a-z0-9]{1,12}|source\/structure\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)$/.test(name);
+  return /^(?:README\.md|document\.md|report\.json|source\/(?:original\.(?:hwp|hwpx)|structure\.hwpx)|assets\/[a-f0-9]{64}\.[a-z0-9]{1,12}|source\/structure\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)$/.test(name);
 }
 /** Deterministic STORE ZIP with only server-generated, portable output paths. */
 export function writeArchive(input,options={}){

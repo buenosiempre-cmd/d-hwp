@@ -4,6 +4,7 @@ import {readArchive} from './archive.mjs';
 import {parseXml,childElements,textContent,attr} from './xml.mjs';
 import {MAX_MARKDOWN_BYTES} from './frames.mjs';
 import {ConversionFailure} from './failures.mjs';
+import {summarizeReviewIssues} from './markdown-review.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fail=()=>{throw new ConversionFailure('markdown_structure');};
@@ -29,7 +30,7 @@ export function extractStructuredMarkdown({hwpx,sourceFormat,pageCount,engineLos
   if(!['hwp','hwpx'].includes(sourceFormat)||!Number.isSafeInteger(pageCount)||pageCount<1||pageCount>200)fail();
   const entries=readArchive(hwpx),packageBytes=entries.get('Contents/content.hpf');if(!packageBytes)fail();
   const documents=new Map(),paths=new WeakMap(),textRecords=[],textByParent=new WeakMap();let nodeCount=0,pathBytes=0,textBytes=0,tableGridCells=0;
-  const report={schemaVersion:1,sourceFormat,pageCount,status:'extracted',coverage:{xmlTextNodes:0,renderedTextNodes:0,unaccountedTextNodes:0,xmlTextCharacters:0,renderedTextCharacters:0,scope:'All non-whitespace XML text nodes in parsed package parts; this does not prove visual, binary, attribute, OCR or HWP import completeness.'},counts:{sections:0,paragraphs:0,tables:0,cells:0,images:0,footnotes:0,endnotes:0,headers:0,footers:0,equations:0,textBoxes:0,fields:0,unknownElements:0},tables:[],assets:[],issues:[]};
+  const report={schemaVersion:1,sourceFormat,pageCount,status:'extracted',coverage:{xmlTextNodes:0,renderedTextNodes:0,unaccountedTextNodes:0,xmlTextCharacters:0,renderedTextCharacters:0,scope:'All non-whitespace XML text nodes in parsed package parts; this does not prove visual, binary, attribute, OCR or HWP import completeness.'},counts:{sections:0,paragraphs:0,tables:0,cells:0,images:0,footnotes:0,endnotes:0,headers:0,footers:0,equations:0,textBoxes:0,fields:0,unknownElements:0,alternativeGroups:0,trackedDeletions:0,trackedInsertions:0,dynamicNumbers:0},tables:[],assets:[],alternatives:[],changes:[],issues:[]};
   const issue=(code,path,message)=>{if(report.issues.length>=5000)fail();report.issues.push({code,sourcePath:path,message});};
   const register=(node,path)=>{
     pathBytes+=Buffer.byteLength(path);if(++nodeCount>200000||pathBytes>32*1024*1024)throw new ConversionFailure('markdown_package_size');
@@ -56,7 +57,7 @@ export function extractStructuredMarkdown({hwpx,sourceFormat,pageCount,engineLos
   for(const [path]of entries)if(!documents.has(path)&&!/^Preview\//i.test(path)&&path!=='mimetype')preserveAsset(path);
   const headers=documents.get('Contents/header.xml'),charProperties=new Map(),paraProperties=new Map(),styles=new Map();
   if(headers){for(const n of all(headers,'charPr'))charProperties.set(attr(n,'id'),n);for(const n of all(headers,'paraPr'))paraProperties.set(attr(n,'id'),n);for(const n of all(headers,'style'))styles.set(attr(n,'id'),n);}
-  const notes=[],semanticAttributes=[],claimedAttributes=new WeakMap();
+  const notes=[],semanticAttributes=[],claimedAttributes=new WeakMap(),changeStories=new Map();
   const claimAttribute=(node,key)=>{
     const candidates=Object.keys(node.attrs??{}).filter(candidate=>candidate.split(':').at(-1)===key);
     const selected=Object.hasOwn(node.attrs,key)?key:candidates.length===1?candidates[0]:undefined;
@@ -70,7 +71,31 @@ export function extractStructuredMarkdown({hwpx,sourceFormat,pageCount,engineLos
     // whitespace rather than allowing that trimming to remove source characters.
     return record||['t','script','stringParam','shapeComment'].includes(node.name)?text.replace(/^\s+|\s+$/gu,space=>[...space].map(c=>'&#'+c.codePointAt(0)+';').join('')):text;
   };
-  const renderChildren=(node,context={})=>(node.children??[]).map((child,index)=>typeof child==='string'?renderText(node,index,child):render(child,context)).join('');
+  const runStyle=node=>{
+    const format=charProperties.get(attr(node,'charPrIDRef'));if(!format)return [];
+    const present=name=>nodes(format).some(child=>child.name===name),style=[];
+    if(present('supscript'))style.push('위첨자');if(present('subscript'))style.push('아래첨자');
+    if(present('strikeout')&&attr(first(format,'strikeout'),'shape')!=='NONE')style.push('취소선');
+    if(present('bold'))style.push('굵게');if(present('italic'))style.push('기울임');
+    const underline=first(format,'underline');if(underline&&attr(underline,'type')!=='NONE')style.push('밑줄');
+    return style;
+  };
+  const styled=(style,body)=>style.reduce((value,label)=>`〔${label}: ${value}〕`,body);
+  const renderChildren=(node,context={})=>{
+    const children=node.children??[],parts=[];
+    for(let index=0;index<children.length;index++){
+      const child=children[index];
+      if(typeof child==='string'){parts.push(renderText(node,index,child));continue;}
+      if(child.name==='run'&&standardNamespace(child.uri)){
+        const style=runStyle(child),key=style.join('|'),bodies=[renderChildren(child,context)];
+        // One annotation for adjacent equal styles; Markdown emphasis delimiters
+        // can otherwise turn **A****B** into authored-looking literal asterisks.
+        while(index+1<children.length){const next=children[index+1];if(typeof next==='string'||next.name!=='run'||!standardNamespace(next.uri)||runStyle(next).join('|')!==key)break;index++;bodies.push(renderChildren(next,context));}
+        parts.push(styled(style,bodies.join('')));
+      }else parts.push(render(child,context));
+    }
+    return parts.join('');
+  };
   const plainChildren=node=>{const consume=n=>(n.children??[]).map((child,index)=>typeof child==='string'?renderText(n,index,child):consume(child)).join('');return consume(node);};
   const render=(node,context={})=>{
     const path=paths.get(node),name=node.name;
@@ -83,20 +108,40 @@ export function extractStructuredMarkdown({hwpx,sourceFormat,pageCount,engineLos
       const para=paraProperties.get(attr(node,'paraPrIDRef')),heading=para&&first(para,'heading'),kind=heading&&attr(heading,'type'),level=heading&&integer(attr(heading,'level'),0,20),style=styles.get(attr(node,'styleIDRef'));
       const prefix=kind==='OUTLINE'?'#'.repeat(Math.min(6,2+(level??0)))+' ':kind==='NUMBER'||kind==='BULLET'?`- [${kind==='NUMBER'?'번호':'글머리표'} 단계 ${(level??0)+1}] `:'';
       const styleName=style&&attr(style,'name');
-      let metadata='';if(kind==='NUMBER'||kind==='BULLET'){metadata=`\n\n> 문단 번호 정의: ${props(heading,['type','idRef','level'])}${styleName?' · 스타일 '+escaped(styleName):''}`;issue('numbering_requires_review',path,'Numbering/bullet definitions are retained, but the displayed counter or glyph is not reconstructed.');}
+      let metadata='';if(kind==='NUMBER'||kind==='BULLET'||kind==='OUTLINE'){metadata=`\n\n> 문단 번호 정의: ${props(heading,['type','idRef','level'])}${styleName?' · 스타일 '+escaped(styleName):''}`;issue('numbering_requires_review',path,'Numbering/bullet definitions are retained, but the displayed counter or glyph is not reconstructed.');}
       return '\n\n'+(body?prefix+body:'> [빈 문단]')+metadata+'\n\n';
     }
-    if(name==='run'){
-      let body=renderChildren(node,context);const format=charProperties.get(attr(node,'charPrIDRef'));
-      if(format){const present=n=>nodes(format).some(child=>child.name===n);if(present('supscript'))body=`〔위첨자: ${body}〕`;if(present('subscript'))body=`〔아래첨자: ${body}〕`;if(present('strikeout')&&attr(first(format,'strikeout'),'shape')!=='NONE')body=`〔취소선: ${body}〕`;if(present('bold'))body=`**${body}**`;if(present('italic'))body=`*${body}*`;const underline=first(format,'underline');if(underline&&attr(underline,'type')!=='NONE')body=`〔밑줄: ${body}〕`;}
-      return body;
+    if(name==='run')return styled(runStyle(node),renderChildren(node,context));
+    if(name==='switch'){
+      const number=++report.counts.alternativeGroups,branches=[];
+      const content=(node.children??[]).map((child,index)=>{
+        if(typeof child==='string')return renderText(node,index,child);
+        if(!['case','default'].includes(child.name))return render(child,context);
+        const branch={kind:child.name,sourcePath:paths.get(child),requiredNamespace:claimAttribute(child,'required-namespace')??null};branches.push(branch);
+        const label=child.name==='default'?'호환용 대체 표현':'조건부 표현';
+        return `\n\n#### ${label} ${branches.length}${branch.requiredNamespace?' · 요구 namespace: '+escaped(branch.requiredNamespace):''}\n\n${renderChildren(child,{...context,changeScope:paths.get(child)})}`;
+      }).join('');
+      report.alternatives.push({id:'alternative-'+number,sourcePath:path,selection:'not_resolved',branches});
+      issue('alternative_representations',path,'Conditional branches describe alternative representations of one object. All are retained and labeled; the active branch must be checked in the source viewer.');
+      return `\n\n### 대체 표현 묶음 ${number}\n\n> 한 개체의 조건별 표현을 각각 보존했습니다. 실제 표시되는 가지는 원본 보기로 확인하세요.\n\n${content}\n\n`;
+    }
+    if(['deleteBegin','deleteEnd','insertBegin','insertEnd'].includes(name)){
+      const kind=name.startsWith('delete')?'delete':'insert',label=kind==='delete'?'삭제된 내용':'삽입된 내용',begin=name.endsWith('Begin'),scope=context.changeScope??'document';
+      let story=changeStories.get(scope);if(!story){story={delete:[],insert:[]};changeStories.set(scope,story);}
+      let record;
+      if(begin){
+        report.counts[kind==='delete'?'trackedDeletions':'trackedInsertions']++;
+        record={kind,sourcePath:path,scope,markerId:attr(node,'id')??null,endPath:null};report.changes.push(record);story[kind].push(record);
+        issue('tracked_changes_present',path,'Tracked insertions/deletions are retained with explicit boundaries; deleted content is historical, not current accepted prose.');
+      }else{record=story[kind].pop();if(record)record.endPath=path;else issue('unbalanced_change_markers',path,'A tracked-change end has no matching beginning in this text story.');}
+      return `\n\n> **변경 추적 · ${label} ${begin?'시작':'끝'}** ${props(node,['id','changeIDRef','revisionIDRef','author','date'])}\n\n`;
     }
     if(name==='header'||name==='footer'){
-      report.counts[name==='header'?'headers':'footers']++;return `\n\n### ${name==='header'?'머리말':'꼬리말'} (${props(node,['id','applyPageType'])})\n\n${renderChildren(node,context)}\n\n`;
+      report.counts[name==='header'?'headers':'footers']++;return `\n\n### ${name==='header'?'머리말':'꼬리말'} (${props(node,['id','applyPageType'])})\n\n${renderChildren(node,{...context,changeScope:path})}\n\n`;
     }
     if(name==='footNote'||name==='endNote'){
       const kind=name==='footNote'?'각주':'미주',key=name==='footNote'?'footnotes':'endnotes',number=++report.counts[key],id=(name==='footNote'?'fn':'en')+number;
-      const content=renderChildren(node,context).trim(),meta=props(node,['number','suffixChar']);notes.push(`[^${id}]: **${kind} ${number}**${meta?' ('+meta+')':''}\n\n`+content.split('\n').map(line=>'    '+line).join('\n'));return `[^${id}]`;
+      const content=renderChildren(node,{...context,changeScope:path}).trim(),meta=props(node,['number','suffixChar']);notes.push(`[^${id}]: **${kind} ${number}**${meta?' ('+meta+')':''}\n\n`+content.split('\n').map(line=>'    '+line).join('\n'));return `[^${id}]`;
     }
     if(name==='equation'){
       report.counts.equations++;return `\n\n**수식 ${report.counts.equations} · 한글 수식 원문**\n\n${renderChildren(node,context)}\n\n`;
@@ -110,7 +155,7 @@ export function extractStructuredMarkdown({hwpx,sourceFormat,pageCount,engineLos
         const addr=first(cell,'cellAddr'),span=first(cell,'cellSpan');if(!addr)fail();const row=integer(attr(addr,'rowAddr'),0,rows-1),column=integer(attr(addr,'colAddr'),0,columns-1),rowSpan=integer(span&&attr(span,'rowSpan'),1,rows),colSpan=integer(span&&attr(span,'colSpan'),1,columns);if(!rowSpan||!colSpan||row+rowSpan>rows||column+colSpan>columns)fail();
         const cellId=`${id}-r${row+1}c${column+1}`;for(let r=row;r<row+rowSpan;r++)for(let c=column;c<column+colSpan;c++){if(grid[r][c]!=='—')fail();grid[r][c]=r===row&&c===column?`R${row+1}C${column+1}`:`↖ R${row+1}C${column+1}`;}
         table.cells.push({row:row+1,column:column+1,rowSpan,colSpan});report.counts.cells++;
-        const content=renderChildren(cell,{...context,parentTable:id}).trim();details.push(`**${cellId} · 행 ${row+1}, 열 ${column+1} · rowSpan=${rowSpan}, colSpan=${colSpan}**\n\n${content||'[빈 셀]'}\n`);
+        const content=renderChildren(cell,{...context,parentTable:id,changeScope:paths.get(cell)}).trim();details.push(`**${cellId} · 행 ${row+1}, 열 ${column+1} · rowSpan=${rowSpan}, colSpan=${colSpan}**\n\n${content||'[빈 셀]'}\n`);
       }
       // Render non-row content too (e.g. captions), never erase it with a table-only path.
       const extra=(node.children??[]).map((child,index)=>typeof child==='string'?renderText(node,index,child):child.name==='tr'?'':render(child,context)).join('');
@@ -133,28 +178,35 @@ export function extractStructuredMarkdown({hwpx,sourceFormat,pageCount,engineLos
     }
     if(name==='fieldEnd')return `〔필드 끝: ${props(node,['beginIDRef'])}〕`;
     if(name==='bookmark')return `〔책갈피: ${props(node,['name'])}〕`+renderChildren(node,context);
-    if(name==='autoNum'||name==='newNum'||name==='pageNum')return `〔자동 번호: ${props(node,['num','numType','newNum','number','type'])}〕`+renderChildren(node,context);
+    if(name==='autoNum'||name==='newNum'||name==='pageNum'){
+      const type=attr(node,'numType')??attr(node,'type')??'',dynamic=name==='pageNum'||['PAGE','TOTAL_PAGE','TOTALPAGE','PAGE_COUNT'].includes(type.toUpperCase());
+      const raw=props(node,['num','numType','newNum','number','type']);
+      if(dynamic){report.counts.dynamicNumbers++;issue('dynamic_page_number_requires_review',path,'A page field stores a control value, not a verified displayed page number. Its actual page or total must be checked in the rendered source.');return `〔동적 ${type.toUpperCase().includes('TOTAL')?'전체 쪽 수':'쪽 번호'}: 실제 표시값 확인 필요 · 원본 제어값 ${raw}〕`+renderChildren(node,context);}
+      return `〔자동 번호: ${raw}〕`+renderChildren(node,context);
+    }
     if(name==='lineBreak')return '  \n';if(name==='tab')return '&#9;';if(name==='nbSpace')return '\u00a0';if(name==='fwSpace')return '\u3000';if(name==='hyphen')return '\\-';
     if(shapes.has(name)){
       const draw=all(node,'drawText').length>0;if(draw)report.counts.textBoxes++;else issue('visual_object_not_interpreted',path,'A non-text visual object requires the source document for interpretation.');
-      return `\n\n**${draw?'글상자':'개체'} (${escaped(node.qname)})** ${props(node,['id','href','type','name'])}\n\n${renderChildren(node,context)}\n\n`;
+      return `\n\n**${draw?'글상자':'개체'} (${escaped(node.qname)})** ${props(node,['id','href','type','name'])}\n\n${renderChildren(node,draw?{...context,changeScope:path}:context)}\n\n`;
     }
     if(simpleWrappers.has(name)||layout.has(name))return renderChildren(node,context);
     report.counts.unknownElements++;issue('unknown_element',path,'An unsupported XML element was retained as escaped text and attributes.');
     return `\n\n〔미지원 구조: ${escaped(node.qname)}${Object.keys(node.attrs??{}).length?' · '+props(node,Object.keys(node.attrs)):''}〕\n`+renderChildren(node,context)+'\n';
   };
   const body=[];
-  for(const [path,section]of sections){report.counts.sections++;body.push(`\n\n## 구역 ${report.counts.sections}\n\n`+render(section));}
+  for(const [path,section]of sections){report.counts.sections++;body.push(`\n\n## 구역 ${report.counts.sections}\n\n`+render(section,{changeScope:path}));}
+  for(const story of changeStories.values())for(const kind of ['delete','insert'])for(const record of story[kind])issue('unbalanced_change_markers',record.sourcePath,'A tracked-change beginning has no matching end in this text story.');
   if(notes.length)body.push('\n\n## 각주·미주\n\n'+notes.join('\n\n'));
   // Metadata such as field names and comments may live in attributes instead of text nodes.
   const semantic=new Set(['name','description','alt','title','value','href','uri','author','date','label','text','content','subject','prefixChar','suffixChar','userChar','startNumber']);
   for(const [path,document]of documents){const scan=node=>{
     const unknownMetadata=!seenSections.has(path)&&(!metadataLayout.has(node.name)||!standardNamespace(node.uri));
     if(unknownMetadata){report.counts.unknownElements++;issue('unknown_metadata',paths.get(node),'Unsupported auxiliary metadata is retained as text and attributes; its semantics require review.');}
+    const numberingDefinition=['heading','numbering','paraHead','bullet'].includes(node.name);
     let unknownAttribute=false;
     for(const [key,value]of Object.entries(node.attrs??{})){
       const local=key.split(':').at(-1),qualifiedUnknown=key.includes(':')&&!key.startsWith('xml:')&&!key.startsWith('xmlns'),uninterpreted=seenSections.has(path)&&!layoutAttributes.has(local)&&!semantic.has(local);
-      if(!key.startsWith('xmlns')&&(semantic.has(local)||unknownMetadata||uninterpreted||qualifiedUnknown)&&meaningful(value)&&!claimedAttributes.get(node)?.has(key)){semanticAttributes.push({sourcePath:paths.get(node)+'/@'+key,value});if(uninterpreted||qualifiedUnknown)unknownAttribute=true;}
+      if(!key.startsWith('xmlns')&&(semantic.has(local)||unknownMetadata||numberingDefinition||uninterpreted||qualifiedUnknown)&&meaningful(value)&&!claimedAttributes.get(node)?.has(key)){semanticAttributes.push({sourcePath:paths.get(node)+'/@'+key,value});if(uninterpreted||qualifiedUnknown)unknownAttribute=true;}
     }
     if(unknownAttribute)issue('unknown_attributes',paths.get(node),'Unrecognized attributes are retained verbatim; their effect on document meaning requires review.');
     for(const child of nodes(node))scan(child);
@@ -194,8 +246,8 @@ export function extractStructuredMarkdown({hwpx,sourceFormat,pageCount,engineLos
   report.coverage.xmlTextNodes=textRecords.length;report.coverage.renderedTextNodes=textRecords.filter(record=>record.consumed).length;report.coverage.unaccountedTextNodes=textRecords.filter(record=>!record.consumed).length;report.coverage.xmlTextCharacters=textRecords.reduce((sum,record)=>sum+[...record.value].length,0);report.coverage.renderedTextCharacters=textRecords.filter(record=>record.consumed).reduce((sum,record)=>sum+[...record.value].length,0);
   report.status=report.issues.length?'needs_review':'extracted';
   const intro='# 문서 구조 Markdown\n\n> 이 문서는 구조 XML의 내용을 Markdown으로 옮긴 결과입니다. 원문과 그림은 같은 패키지에 보존합니다. 추출된 텍스트의 대응 검사는 모든 시각 정보나 이미지 속 글자의 완전한 이해를 뜻하지 않습니다.\n\n'
-    +`- 원본 형식: ${sourceFormat.toUpperCase()} · 엔진 쪽 수: ${pageCount} · 구역: ${report.counts.sections}\n- XML 텍스트 대응: ${report.coverage.renderedTextNodes}/${report.coverage.xmlTextNodes} · 미대응: ${report.coverage.unaccountedTextNodes}\n- 검토 항목: ${report.issues.length} · 그림 속 글자 OCR: 수행하지 않음\n\n`
-    +(report.issues.length?'## 확인이 필요한 내용\n\n'+report.issues.map(item=>`- ${escaped(item.code)} · ${escaped(item.sourcePath)}: ${escaped(item.message)}`).join('\n')+'\n\n':'');
+    +`- 원본 형식: ${sourceFormat.toUpperCase()} · 엔진 쪽 수: ${pageCount} · 구역: ${report.counts.sections}\n- XML 텍스트 대응: ${report.coverage.renderedTextNodes}/${report.coverage.xmlTextNodes} · 미대응: ${report.coverage.unaccountedTextNodes}\n- 검토 항목: ${report.issues.length} · 그림 OCR 보충 결과: README.md 및 report.json 참조\n\n`
+    +(report.issues.length?'## 확인이 필요한 내용\n\n'+summarizeReviewIssues(report.issues).map(item=>`- **${escaped(item.label)} ${item.count}건**: ${escaped(item.description)} (${escaped(item.code)})`).join('\n')+'\n\n세부 위치와 전체 검토 항목은 report.json에 보존했습니다.\n\n':'');
   const markdown=Buffer.from(intro+body.join('\n')+'\n','utf8');if(markdown.length>MAX_MARKDOWN_BYTES)throw new ConversionFailure('markdown_size');
   if(Buffer.byteLength(JSON.stringify(report))>2*1024*1024)throw new ConversionFailure('markdown_package_size');
   return {markdown,assets,report};

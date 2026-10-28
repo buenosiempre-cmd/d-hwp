@@ -8,7 +8,7 @@ import {readFrames,OutputError} from './frames.mjs';
 import {normalizeSelectedPages} from './selection.mjs';
 import {pageZip} from './zip.mjs';
 export {MAX_PDF_BYTES,MAX_PNG_BYTES,MAX_PNG_TOTAL_BYTES,MAX_PREVIEW_PAGES,MAX_MARKDOWN_BYTES,MAX_TEXT_BYTES,MAX_ZIP_BYTES,MAX_MARKDOWN_PACKAGE_BYTES,MAX_MARKDOWN_REPORT_BYTES} from './frames.mjs';
-const METRIC_STAGES=new Set(['wasm_compile','runtime_reuse','browser_start','process_start','input','wasm_init','parse','markdown','text','svg_render','fonts_prepare','browser_render','dom_prepare','page_attach','fonts_ready','pdf','png','output']);
+const METRIC_STAGES=new Set(['wasm_compile','runtime_reuse','browser_start','process_start','input','wasm_init','parse','markdown','ocr','text','svg_render','fonts_prepare','browser_render','dom_prepare','page_attach','fonts_ready','pdf','png','output']);
 export class ConversionError extends Error {constructor(code,message,stage){super(message);this.code=code;this.stage=stage;}}
 export function validMetric(value){
   if(!value||!METRIC_STAGES.has(value.stage)||!['start','finish','failed'].includes(value.phase))return;
@@ -91,7 +91,7 @@ function startRuntime(metric){
   })();
   r.ready.catch(()=>{});return r;
 }
-function convert(bytes,{timeoutMs=60_000,onMetric,signal,onPdf,onPage}={},mode,start,end,selectedPages){
+function convert(bytes,{timeoutMs=60_000,onMetric,signal,onPdf,onPage,ocr}={},mode,start,end,selectedPages){
   if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>900_000)return Promise.reject(new ConversionError('conversion_start','변환 제한 시간이 올바르지 않습니다.'));
   if(!(bytes instanceof Uint8Array)||bytes.byteLength>20*1024*1024)return Promise.reject(new ConversionError('conversion_start','문서 크기가 올바르지 않습니다.'));
   if(pending>=MAX_PENDING)return Promise.reject(new ConversionError('conversion_busy','변환 요청이 많습니다. 잠시 후 다시 시도하세요.'));
@@ -108,14 +108,14 @@ function convert(bytes,{timeoutMs=60_000,onMetric,signal,onPdf,onPage}={},mode,s
   pending++;
   const run=tail.then(()=>{
     if(controller.signal.aborted)throw new ConversionError('conversion_aborted','문서 변환이 취소되었습니다.');
-    executing=true;return runConversion(input,{timeoutMs:deadline-Date.now(),onMetric,signal:controller.signal,onPdf,onPage},mode,start,end,selectedPages);
+    executing=true;return runConversion(input,{timeoutMs:deadline-Date.now(),onMetric,signal:controller.signal,onPdf,onPage,ocr},mode,start,end,selectedPages);
   }).finally(()=>{pending--;input=undefined;});
   tail=run.then(()=>{},()=>{});
   return Promise.race([run,cancelled]).finally(()=>{
     clearTimeout(timer);signal?.removeEventListener('abort',abort);controller.signal.removeEventListener('abort',cancel);
   });
 }
-async function runConversion(bytes,{timeoutMs,onMetric,signal,onPdf,onPage},mode,start,end,selectedPages){
+async function runConversion(bytes,{timeoutMs,onMetric,signal,onPdf,onPage,ocr},mode,start,end,selectedPages){
   if(signal?.aborted)throw new ConversionError('conversion_aborted','문서 변환이 취소되었습니다.');
   if(timeoutMs<=0)throw new ConversionError('conversion_timeout','문서 변환 시간이 초과되었습니다.','queue');
   let stage='runtime_start';
@@ -143,7 +143,7 @@ async function runConversion(bytes,{timeoutMs,onMetric,signal,onPdf,onPage},mode
     const result=await Promise.race([stopped,(async()=>{
       await r.ready;
       if(r.disposed)throw new ConversionError('conversion_child','문서 변환에 실패했습니다.',stage);
-      childSend(r.child,{type:'convert',mode,start,end,selectedPages,bytes},r.failure);
+      childSend(r.child,{type:'convert',mode,start,end,selectedPages,bytes,ocr},r.failure);
       return readFrames(r.stream,mode,start,end,{onPdf,onPage,eof:false,selectedPages});
     })()]);
     r.jobs++;r.metric=undefined;r.reject=undefined;

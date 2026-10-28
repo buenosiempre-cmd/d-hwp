@@ -26,7 +26,7 @@ await check('required_runtime_files', async () => {
   for (const path of [
     'package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
     'src/server/main.ts', 'src/server/config.ts', 'src/conversion/convert.mjs',
-    'src/conversion/validate-child.mjs', 'src/shared/errors.ts',
+    'src/conversion/validate-child.mjs', 'src/conversion/ocr.mjs', 'src/shared/errors.ts',
     'dist/editor/index.html', 'dist/studio/index.html',
     '.cache/conversion/runtime.json', '.cache/conversion/print.js',
     '.cache/conversion/fonts.json', '.cache/conversion/pdf-child.mjs',
@@ -64,12 +64,12 @@ await check('conversion_asset_integrity', async () => {
   const {cacheKey, ...identity} = runtime;
   requireValue(cacheKey === digest(JSON.stringify(identity)) && plain(runtime.hashes));
   for (const path of [
-    'node_modules/@rhwp/core/rhwp_bg.wasm', 'node_modules/@rhwp/core/rhwp.js',
+    'src/conversion/ocr.mjs', 'node_modules/@rhwp/core/rhwp_bg.wasm', 'node_modules/@rhwp/core/rhwp.js',
     '.cache/conversion/fonts.json', '.cache/conversion/print.js',
     '.cache/conversion/pdf-child.mjs', '.cache/conversion/runtime-child.mjs',
   ]) requireValue(/^[a-f0-9]{64}$/.test(runtime.hashes[path]));
   for (const [path, expected] of Object.entries(runtime.hashes)) {
-    requireValue(typeof path === 'string' && /^(?:node_modules\/@rhwp\/core\/[a-zA-Z0-9_.-]+|\.cache\/conversion\/[a-zA-Z0-9_.-]+)$/.test(path));
+    requireValue(typeof path === 'string' && /^(?:src\/conversion\/ocr\.mjs|node_modules\/@rhwp\/core\/[a-zA-Z0-9_.-]+|\.cache\/conversion\/[a-zA-Z0-9_.-]+)$/.test(path));
     requireValue(/^[a-f0-9]{64}$/.test(expected) && digest(await read(path)) === expected);
   }
   const fonts = await metadata('.cache/conversion/fonts.json');

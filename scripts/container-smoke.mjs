@@ -14,8 +14,8 @@ for(const suite of ['unit','slack','security']){
   const result=spawnSync(process.execPath,['scripts/run-tests.mjs',suite],{stdio:'inherit'});
   assert.equal(result.status,0,`${suite} checks failed`);
 }
-const conversion=spawnSync(process.execPath,['--test','tests/conversion/render.test.mjs'],{stdio:'inherit'});
-assert.equal(conversion.status,0,'streaming PDF and range retry failed');
+const conversion=spawnSync(process.execPath,['--test','tests/conversion/render.test.mjs','tests/conversion/structured-document.test.mjs','tests/conversion/markdown-package-frames.test.mjs'],{stdio:'inherit'});
+assert.equal(conversion.status,0,'PDF/PNG and structured Markdown package checks failed');
 if(process.argv.includes('--server-only')){
   const {convertPdf,closeConversionRuntime}=await import('../src/conversion/convert.mjs');
   for(const format of ['hwp','hwpx']){

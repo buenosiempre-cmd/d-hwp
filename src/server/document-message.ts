@@ -26,7 +26,7 @@ export function documentMessage(card:Card,origin:string,editorMode:'embed'|'brow
     const blocks:Record<string,unknown>[]=[{type:'section',text:{type:'mrkdwn',text:'*'+documentText(card)+'* · '+detail+pdf}}];
     const outputs:Record<string,unknown>[]=[];
     if(card.pdf==='ready'&&card.pdfUrl)outputs.push({type:'button',action_id:'rhwp_view_pdf',text:{type:'plain_text',text:'PDF 열기'},url:card.pdfUrl});
-    outputs.push({type:'button',action_id:'rhwp_export_markdown',value:card.id,text:{type:'plain_text',text:card.exports?.['markdown-v2']?.url?'문서 Markdown 다시 받기':'문서 Markdown (ZIP)'}});
+    outputs.push({type:'button',action_id:'rhwp_export_markdown',value:card.id,text:{type:'plain_text',text:(card.exports?.['markdown-v3']?.url||card.exports?.['markdown-v3-ocr']?.url)?'문서 Markdown 다시 받기':'문서 Markdown (ZIP)'}});
     outputs.push({type:'button',action_id:'rhwp_export_options',value:card.id,text:{type:'plain_text',text:'형식·쪽 선택'}});
     blocks.push({type:'actions',elements:outputs});
     if(card.recovery?.state==='running')blocks.push({type:'context',elements:[{type:'plain_text',text:card.recovery.attempt===0?'미리보기 요청을 접수했습니다. PDF·이미지를 준비할 차례를 기다리고 있습니다.':'PDF·이미지를 다시 준비하고 있습니다.'}]});

@@ -89,7 +89,7 @@ node --env-file=/absolute/private/d-hwp-slack.env --import tsx scripts/slack-pre
 node --env-file=/absolute/private/d-hwp-slack.env --import tsx src/server/main.ts
 ```
 
-첫 명령은 `auth.test`로 설치된 bot·워크스페이스와 일부 production 자산을 확인하며 원문 응답이나 토큰을 출력하지 않습니다. 둘째 명령은 `127.0.0.1:4195`에서 시작합니다. launchd에는 위 Node의 **고정 절대경로**, 같은 arguments, 고정 릴리스 `WorkingDirectory`, D-HWP Slack 전용 label과 로그 경로를 지정합니다. `PATH`에서 우연히 찾은 다른 Node 버전이나 개발 중인 checkout에 의존하지 않습니다.
+첫 명령은 `auth.test`로 설치된 bot·워크스페이스와 일부 production 자산을 확인하며 원문 응답이나 토큰을 출력하지 않습니다. 앱 ID·권한 범위·이벤트 URL은 별도로 확인합니다. OCR 경로를 설정했다면 고정 코드·모델 해시도 시작 전에 확인합니다. 둘째 명령은 `127.0.0.1:4195`에서 시작합니다. launchd에는 위 Node의 **고정 절대경로**, 같은 arguments, 고정 릴리스 `WorkingDirectory`, D-HWP Slack 전용 label과 로그 경로를 지정합니다. `PATH`에서 우연히 찾은 다른 Node 버전이나 개발 중인 checkout에 의존하지 않습니다.
 
 ## 5. 공간을 아끼는 별도 릴리스
 
@@ -119,3 +119,7 @@ Chromium과 Node는 기존의 **고정된 전용 설치 경로**를 참조해 �
 장애가 있으면 신규 D-HWP Slack 프로세스·터널 연결만 중지하거나 직전 검증 릴리스로 되돌립니다. 기존 rhwp 앱, 다른 작업실, 규정 MCP 서비스와 사용자 Slack 파일은 유지합니다. Mac 전원·로그인 세션·네트워크에 따른 가용성 한계를 운영 기록에 남깁니다.
 
 실제 앱 생성·설치·HTTPS 요청·업로드 결과가 확인되면 그 증거와 미검증 항목을 별도 배포 기록에 남깁니다. 이 안내만으로 실제 배포 성공을 표시하지 않습니다.
+
+## 그림 OCR 설치 선택
+
+[구조 Markdown 안내](d-hwp-markdown.md)의 DHWP_KORDOC_MODULE·DHWP_KORDOC_MODEL_CACHE를 함께 설정하면 오프라인 그림 OCR을 켭니다. 기본 배포 이미지와 공개 코퍼스 검사는 모델 없이도 구조 변환을 검증합니다. OCR 프로필을 설정한 운영 환경은 별도의 실제 합성 OCR 검사도 통과해야 합니다. 모델이나 코드가 바뀌면 고정 해시 검사를 통과하지 못하므로 임의 버전으로 교체하지 않습니다.

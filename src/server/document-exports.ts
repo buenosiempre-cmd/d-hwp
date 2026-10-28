@@ -1,7 +1,7 @@
 import {UserError} from './errors';
 import {savedAttempt,type UploadAttempt} from './uploads';
 
-export type ExportRequest={format:'txt'}|{format:'markdown'}|{format:'zip';pages:number[]};
+export type ExportRequest={format:'txt'}|{format:'markdown';ocr?:true}|{format:'zip';pages:number[]};
 export interface ExportReceipt {request:ExportRequest;attempt?:UploadAttempt;fileId?:string;url?:string;}
 export const MAX_DOCUMENT_EXPORTS=20;
 const invalid=()=>new UserError('export_selection','1~200쪽 중 최대 10쪽을 선택하세요. 예: 1,3-5,12');
@@ -22,7 +22,7 @@ export function normalizeExportRequest(value:unknown):ExportRequest{
   if(!value||typeof value!=='object')throw invalid();
   const request=value as Record<string,unknown>;
   if(request.format==='txt')return {format:'txt'};
-  if(request.format==='markdown')return {format:'markdown'};
+  if(request.format==='markdown'){if(request.ocr!==undefined&&typeof request.ocr!=='boolean')throw invalid();return {format:'markdown',...(request.ocr?{ocr:true}:{})};}
   if(request.format!=='zip'||!Array.isArray(request.pages)||!request.pages.length||request.pages.length>200||request.pages.some(page=>!Number.isInteger(page)||page<1||page>200))throw invalid();
   const pages=[...new Set(request.pages as number[])].sort((a,b)=>a-b);
   if(pages.length>10)throw invalid();
@@ -30,7 +30,7 @@ export function normalizeExportRequest(value:unknown):ExportRequest{
 }
 export function exportKey(request:ExportRequest):string{
   const normalized=normalizeExportRequest(request);
-  return normalized.format==='txt'?'txt':normalized.format==='markdown'?'markdown-v2':'zip:'+normalized.pages.join(',');
+  return normalized.format==='txt'?'txt':normalized.format==='markdown'?(normalized.ocr?'markdown-v3-ocr':'markdown-v3'):'zip:'+normalized.pages.join(',');
 }
 export function exportName(name:string,request:ExportRequest):string{
   const base=name.replace(/\.(hwp|hwpx)$/i,'').replace(/[\u0000-\u001f\u007f/\\]/g,'').slice(0,140)||'document';

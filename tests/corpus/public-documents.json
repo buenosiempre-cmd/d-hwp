@@ -1,0 +1,300 @@
+{
+  "schemaVersion": 1,
+  "scope": "Public upstream synthetic regression fixtures and blank forms only. Marker/structure gates do not establish OCR, semantic or layout completeness. Document binaries remain in the ignored cache.",
+  "documents": [
+    {
+      "id": "rhwp-clickhere-two-tables",
+      "format": "hwp",
+      "repository": "edwardkim/rhwp",
+      "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+      "path": "tests/fixtures/clickhere_cell_parent_identity/two_tables.hwp",
+      "url": "https://raw.githubusercontent.com/edwardkim/rhwp/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/clickhere_cell_parent_identity/two_tables.hwp",
+      "bytes": 13312,
+      "sha256": "7f02fc45af5c1017a23c667e4354dbee379895c68d3e40cdd8d72ae15ac3042b",
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/LICENSE"
+      },
+      "expectationSource": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/tests/cases/clickhere_cell_parent_identity.rs",
+      "provenance": "Repository-authored two-table field identity regression; separate FIRSTGUIDE and SECONDGUIDE fields.",
+      "expected": {
+        "text": [
+          "FIRSTGUIDE",
+          "SECONDGUIDE"
+        ],
+        "counts": {
+          "tables": 2,
+          "fields": 2
+        }
+      }
+    },
+    {
+      "id": "rhwp-header-hancom",
+      "format": "hwp",
+      "repository": "edwardkim/rhwp",
+      "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+      "path": "tests/fixtures/stored_column_width_quantization/header-hancom-2020.hwp",
+      "url": "https://raw.githubusercontent.com/edwardkim/rhwp/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/stored_column_width_quantization/header-hancom-2020.hwp",
+      "bytes": 12800,
+      "sha256": "d660f4cd8fb90eea07b7ad742a2e121edc159e5e74df73fd5c62b2e5bea7c560",
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/LICENSE"
+      },
+      "expectationSource": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/stored_column_width_quantization/README.md",
+      "provenance": "Synthetic Left 10 + 95 spaces + Right, independently saved with Hancom; source README supplies expected text and SHA.",
+      "expected": {
+        "text": [
+          "Left 10                                                                                               Right"
+        ],
+        "counts": {
+          "paragraphs": 1
+        }
+      }
+    },
+    {
+      "id": "rhwp-nested-mixed-cell",
+      "format": "hwp",
+      "repository": "edwardkim/rhwp",
+      "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+      "path": "tests/fixtures/pr7518_review_page_budget/valid_hancom/nested-mixed-cell.hwp",
+      "url": "https://raw.githubusercontent.com/edwardkim/rhwp/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/pr7518_review_page_budget/valid_hancom/nested-mixed-cell.hwp",
+      "bytes": 53760,
+      "sha256": "2dad045a8c50d93d50a59bcec33960fa0a282ebd934c1e1f243130ac24c69d79",
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/LICENSE"
+      },
+      "expectationSource": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/pr7518_review_page_budget/README.md",
+      "provenance": "Upstream synthetic nested-table diagnostic normalized by Hancom; UNIT 000 through 064 and three pictures. No universal layout equivalence assertion.",
+      "expected": {
+        "text": [
+          "UNIT 000",
+          "UNIT 001",
+          "UNIT 002",
+          "UNIT 003",
+          "UNIT 004",
+          "UNIT 005",
+          "UNIT 006",
+          "UNIT 007",
+          "UNIT 008",
+          "UNIT 009",
+          "UNIT 010",
+          "UNIT 011",
+          "UNIT 012",
+          "UNIT 013",
+          "UNIT 014",
+          "UNIT 015",
+          "UNIT 016",
+          "UNIT 017",
+          "UNIT 018",
+          "UNIT 019",
+          "UNIT 020",
+          "UNIT 021",
+          "UNIT 022",
+          "UNIT 023",
+          "UNIT 024",
+          "UNIT 025",
+          "UNIT 026",
+          "UNIT 027",
+          "UNIT 028",
+          "UNIT 029",
+          "UNIT 030",
+          "UNIT 031",
+          "UNIT 032",
+          "UNIT 033",
+          "UNIT 034",
+          "UNIT 035",
+          "UNIT 036",
+          "UNIT 037",
+          "UNIT 038",
+          "UNIT 039",
+          "UNIT 040",
+          "UNIT 041",
+          "UNIT 042",
+          "UNIT 043",
+          "UNIT 044",
+          "UNIT 045",
+          "UNIT 046",
+          "UNIT 047",
+          "UNIT 048",
+          "UNIT 049",
+          "UNIT 050",
+          "UNIT 051",
+          "UNIT 052",
+          "UNIT 053",
+          "UNIT 054",
+          "UNIT 055",
+          "UNIT 056",
+          "UNIT 057",
+          "UNIT 058",
+          "UNIT 059",
+          "UNIT 060",
+          "UNIT 061",
+          "UNIT 062",
+          "UNIT 063",
+          "UNIT 064"
+        ],
+        "counts": {
+          "tables": 2,
+          "images": 3
+        },
+        "minimumRasterAssets": 3
+      }
+    },
+    {
+      "id": "rhwp-multiline-cell",
+      "format": "hwpx",
+      "repository": "edwardkim/rhwp",
+      "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+      "path": "tests/fixtures/multiline_cell_zero_positions/two_lines.hwpx",
+      "url": "https://raw.githubusercontent.com/edwardkim/rhwp/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/multiline_cell_zero_positions/two_lines.hwpx",
+      "bytes": 6235,
+      "sha256": "fc8a807e79eca85b2c07991fd2001880433acc2dd458c27d5fda0b4c2d28b8d7",
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/LICENSE"
+      },
+      "expectationSource": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/multiline_cell_zero_positions/README.md",
+      "provenance": "README states synthetic input has exactly First line and Second line, not extracted from a private document.",
+      "expected": {
+        "text": [
+          "First line",
+          "Second line"
+        ],
+        "counts": {
+          "tables": 1,
+          "cells": 1
+        }
+      }
+    },
+    {
+      "id": "rhwp-page-total-page",
+      "format": "hwpx",
+      "repository": "edwardkim/rhwp",
+      "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+      "path": "tests/fixtures/issue6986/page-total-page-12-pages.hwpx",
+      "url": "https://raw.githubusercontent.com/edwardkim/rhwp/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/issue6986/page-total-page-12-pages.hwpx",
+      "bytes": 5429,
+      "sha256": "d5c3da31e596da4659d0619b0b79b1246a35d5a89d6a5574d526645818951578",
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/LICENSE"
+      },
+      "expectationSource": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/issue6986/README.md",
+      "provenance": "README states synthetic PAGE/TOTAL_PAGE field contract: twelve explicit page-break copies.",
+      "expected": {
+        "text": [
+          "NEXT PARAGRAPH"
+        ],
+        "counts": {
+          "tables": 12
+        },
+        "pageCount": 12,
+        "requiredIssueCodes": [
+          "dynamic_page_number_requires_review"
+        ]
+      }
+    },
+    {
+      "id": "rhwp-inline-table-break",
+      "format": "hwpx",
+      "repository": "edwardkim/rhwp",
+      "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+      "path": "tests/fixtures/stored_inline_table_suffix/two-digits-break-input.hwpx",
+      "url": "https://raw.githubusercontent.com/edwardkim/rhwp/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/stored_inline_table_suffix/two-digits-break-input.hwpx",
+      "bytes": 6231,
+      "sha256": "ca144f5847f75e53500120bb62b93604d2e580700313d4334dca7fa5ed2e87f4",
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/LICENSE"
+      },
+      "expectationSource": "https://github.com/edwardkim/rhwp/blob/1a76570e833917d15817415a53c09ad61ab3203f/tests/fixtures/stored_inline_table_suffix/two-digits-break-input.hwpx",
+      "provenance": "Upstream generated inline-table line-break regression; direct source XML has three 1x1 tables. Nested tables contain 1 and 2, with outer text x y and h.",
+      "expected": {
+        "text": [
+          "x y"
+        ],
+        "counts": {
+          "tables": 3
+        },
+        "cellText": [
+          {
+            "table": 2,
+            "row": 1,
+            "column": 1,
+            "text": "1"
+          },
+          {
+            "table": 3,
+            "row": 1,
+            "column": 1,
+            "text": "2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "kordoc-simple-draft",
+      "format": "hwpx",
+      "repository": "chrisryugj/kordoc",
+      "commit": "1ce6f26885dbc836166110c46a6f60585af6c15c",
+      "path": "templates/간이기안문_서식.hwpx",
+      "url": "https://raw.githubusercontent.com/chrisryugj/kordoc/1ce6f26885dbc836166110c46a6f60585af6c15c/templates/%EA%B0%84%EC%9D%B4%EA%B8%B0%EC%95%88%EB%AC%B8_%EC%84%9C%EC%8B%9D.hwpx",
+      "bytes": 7261,
+      "sha256": "2b58ef61f74a58126e125841d3850c5769bb642e29d3a2e9e3fb67cf5c58ee29",
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/chrisryugj/kordoc/blob/1ce6f26885dbc836166110c46a6f60585af6c15c/LICENSE"
+      },
+      "expectationSource": "https://github.com/chrisryugj/kordoc/blob/1ce6f26885dbc836166110c46a6f60585af6c15c/templates/간이기안문_서식.hwpx",
+      "provenance": "Public blank form in MIT Kordoc repository; fixed labels and field/table counts read from source XML.",
+      "expected": {
+        "text": [
+          "생산등록번호",
+          "등록일",
+          "결재일",
+          "공개구분",
+          "협조자"
+        ],
+        "counts": {
+          "tables": 4,
+          "fields": 13
+        }
+      }
+    },
+    {
+      "id": "kordoc-general-draft",
+      "format": "hwpx",
+      "repository": "chrisryugj/kordoc",
+      "commit": "1ce6f26885dbc836166110c46a6f60585af6c15c",
+      "path": "templates/일반기안문_서식.hwpx",
+      "url": "https://raw.githubusercontent.com/chrisryugj/kordoc/1ce6f26885dbc836166110c46a6f60585af6c15c/templates/%EC%9D%BC%EB%B0%98%EA%B8%B0%EC%95%88%EB%AC%B8_%EC%84%9C%EC%8B%9D.hwpx",
+      "bytes": 6871,
+      "sha256": "7d40e770a018ae571ab10b5745376b03fd5ffa65fceaf5cce0d87cd0e4d4f437",
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/chrisryugj/kordoc/blob/1ce6f26885dbc836166110c46a6f60585af6c15c/LICENSE"
+      },
+      "expectationSource": "https://github.com/chrisryugj/kordoc/blob/1ce6f26885dbc836166110c46a6f60585af6c15c/templates/일반기안문_서식.hwpx",
+      "provenance": "Public blank form in MIT Kordoc repository; fixed labels and field count read from source XML.",
+      "expected": {
+        "text": [
+          "수신",
+          "제목",
+          "붙임",
+          "수신자",
+          "기안자",
+          "검토자",
+          "결재권자",
+          "협조자",
+          "전화번호",
+          "팩스번호"
+        ],
+        "counts": {
+          "fields": 23
+        }
+      }
+    }
+  ]
+}

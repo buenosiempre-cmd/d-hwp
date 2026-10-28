@@ -39,7 +39,7 @@ test('unfinished outputs are not offered as ready and an existing Markdown still
   assert.equal(pending.some(button=>button.action_id==='rhwp_view_pdf'),false);
   assert.equal(pending.some(button=>button.action_id==='rhwp_more_pages'),false);
   assert.equal(pending.some(button=>button.action_id==='rhwp_export_markdown'),true);
-  const ready=buttons(documentMessage(card({exports:{'markdown-v2':{request:{format:'markdown'},url:'https://rhwp-test.slack.com/files/UBOT/FMD/document_Markdown.zip'}}}),origin));
+  const ready=buttons(documentMessage(card({exports:{'markdown-v3':{request:{format:'markdown'},url:'https://rhwp-test.slack.com/files/UBOT/FMD/document_Markdown.zip'}}}),origin));
   const markdown=ready.find(button=>button.action_id==='rhwp_export_markdown')!;
   assert.equal(markdown.text.text,'문서 Markdown 다시 받기');assert.equal(markdown.value,'synthetic-card');assert.equal(markdown.url,undefined);
   const complete=documentMessage(card({images:Array.from({length:10},(_,index)=>({page:index+1,fileId:'FIMAGE'+(index+1),shared:true}))}),origin);

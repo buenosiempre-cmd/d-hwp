@@ -5,6 +5,8 @@ import {workerData,parentPort} from 'node:worker_threads';
 import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import {ConversionFailure} from './failures.mjs';
+import {enrichWithOcr} from './ocr.mjs';
+import {reviewMarkdown} from './review.mjs';
 import {extractStructuredMarkdown} from './structured-markdown.mjs';
 import {readArchive,writeArchive} from './archive.mjs';
 import {MAX_MARKDOWN_BYTES,MAX_MARKDOWN_REPORT_BYTES,MAX_MARKDOWN_PACKAGE_BYTES} from './frames.mjs';
@@ -50,17 +52,18 @@ try {
         engineLoss=JSON.parse(exported.contentLoss());hwpx=exported.takeBytes();
       }finally{exported.free();}
     }
-    const extracted=extractStructuredMarkdown({hwpx,sourceFormat,pageCount:count,engineLoss,unicode:JSON.parse(doc.getTextFileUnicode()),controls:JSON.parse(doc.getControls())});
-    const suffix=`\n\n## 함께 확인할 파일\n\n- [원본 문서](source/original.${sourceFormat})\n- [추출 대조 보고서](report.json)\n${sourceFormat==='hwp'?'- [엔진이 해석한 HWPX 구조](source/structure.hwpx)\n':''}\n이 Markdown의 이미지와 위 파일은 함께 제공된 ZIP 안에 있습니다. 그림 속 글자와 시각적 의미는 자동 판독하지 않았습니다.\n`;
+    let extracted=extractStructuredMarkdown({hwpx,sourceFormat,pageCount:count,engineLoss,unicode:JSON.parse(doc.getTextFileUnicode()),controls:JSON.parse(doc.getControls())});
+    if(workerData.ocr){begin('ocr');extracted=await enrichWithOcr(extracted,workerData.ocr);if(!['complete','not_needed'].includes(extracted.report.ocr?.runtimeStatus))throw new ConversionFailure('ocr_runtime');}
+    const suffix=`\n\n## 함께 확인할 파일\n\n- [빠른 읽기·검토 안내](README.md)\n- [원본 문서](source/original.${sourceFormat})\n- [추출 대조 보고서](report.json)\n${sourceFormat==='hwp'?'- [엔진이 해석한 HWPX 구조](source/structure.hwpx)\n':''}\n이 Markdown의 이미지와 위 파일은 함께 제공된 ZIP 안에 있습니다. 그림 OCR의 실행 여부와 결과는 README.md와 report.json을 확인하세요. 시각적 의미와 OCR 결과는 원본 대조가 필요합니다.\n`;
     const markdown=Buffer.concat([extracted.markdown,Buffer.from(suffix)]);
     if(markdown.length>MAX_MARKDOWN_BYTES)throw new ConversionFailure('markdown_size');
-    const report={...extracted.report,schemaVersion:1,packageVersion:2,source:{format:sourceFormat,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}};
+    const report={...extracted.report,schemaVersion:1,packageVersion:3,source:{format:sourceFormat,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}};
     const reportBytes=Buffer.from(JSON.stringify(report,null,2));
     if(reportBytes.length>MAX_MARKDOWN_REPORT_BYTES)throw new ConversionFailure('markdown_package_size');
     begin('output');await frame({type:'document',pageCount:count});
     await frame({type:'markdown',bytes:markdown.length},markdown);
     if(mode==='markdown-package'){
-      const zip=writeArchive([{name:'document.md',bytes:markdown},{name:'report.json',bytes:reportBytes},{name:`source/original.${sourceFormat}`,bytes},...(sourceFormat==='hwp'?[{name:'source/structure.hwpx',bytes:hwpx}]:[]),...extracted.assets.map(({name,bytes})=>({name,bytes}))],{maxBytes:MAX_MARKDOWN_PACKAGE_BYTES});
+      const zip=writeArchive([{name:'README.md',bytes:reviewMarkdown(report)},{name:'document.md',bytes:markdown},{name:'report.json',bytes:reportBytes},{name:`source/original.${sourceFormat}`,bytes},...(sourceFormat==='hwp'?[{name:'source/structure.hwpx',bytes:hwpx}]:[]),...extracted.assets.map(({name,bytes})=>({name,bytes}))],{maxBytes:MAX_MARKDOWN_PACKAGE_BYTES});
       await frame({type:'report',bytes:reportBytes.length},reportBytes);
       await frame({type:'archive',bytes:zip.length},zip);
     }
