@@ -10,6 +10,7 @@ export function object(value: unknown): Record<string, unknown> {
 }
 export function userMessage(error: unknown): string {
   const messages:Record<string,string>={
+    conversion_ocr_unavailable:'그림 OCR 처리가 완료되지 않았습니다. 관리자에게 로컬 OCR 프로그램·모델 설정 확인을 요청한 뒤 같은 카드에서 다시 시도해 주세요.',
     conversion_markdown_limit:'문서 Markdown이 2 MiB 제한을 초과했습니다. 내용을 잘라서 제공하지 않았습니다. 원본 또는 PDF를 확인해 주세요.',
     conversion_markdown_package_limit:'문서 Markdown 패키지 크기 제한을 초과했습니다. 원본과 PDF를 확인해 주세요.',
     conversion_markdown_structure:'문서 구조를 안전하게 대조할 수 없습니다. 원본 또는 PDF를 확인해 주세요.',

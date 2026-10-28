@@ -1,9 +1,11 @@
+import {verifyOcrRuntime} from '../conversion/ocr.mjs';
 import {closeConversionRuntime} from '../conversion/convert.mjs';
 import {loadConfig} from './config';
 import {HttpSlackApi} from './slack-api';
 import {createSlackReceiver, verifyInstallation} from './receiver';
 try {
   const config=loadConfig();
+  if(config.markdownOcr)await verifyOcrRuntime(config.markdownOcr);
   const api=new HttpSlackApi(config.botToken);
   const identity=await verifyInstallation(api,config);
   const runtime=createSlackReceiver(config,api,identity);

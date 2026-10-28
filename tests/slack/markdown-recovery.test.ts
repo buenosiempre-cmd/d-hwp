@@ -44,7 +44,7 @@ test('lost Markdown completion response reconciles the same file and concurrent 
     assert.equal(completions(api).length, 1);
     assert.equal(completions(api)[0].args.channel_id, actor.channelId);
     assert.equal(completions(api)[0].args.thread_ts, card.messageTs);
-    assert.equal((await server.documents!.authorize(id, actor)).exports?.['markdown-v2']?.attempt?.saved, true);
+    assert.equal((await server.documents!.authorize(id, actor)).exports?.['markdown-v3']?.attempt?.saved, true);
   } finally { await server.stop(); }
 });
 
@@ -75,7 +75,7 @@ test('an uncertain Markdown command survives restart and recovers one original f
     const {id} = server.preparations.submit({...actor, threadTs: '100.001'}, 'FTEST', 'markdown', 'synthetic-md-command');
     await server.preparations.idle(); await server.documents!.pdf.idle();
     const before = server.state!.get<Card>('cards', id)!;
-    const attempt = before.exports?.['markdown-v2']?.attempt;
+    const attempt = before.exports?.['markdown-v3']?.attempt;
     const originalFileId = attempt?.fileId;
     assert.ok(originalFileId);
     assert.equal(before.requestedMode, 'markdown');
@@ -96,8 +96,8 @@ test('an uncertain Markdown command survives restart and recovers one original f
     visible = true;
     server = await editorServer(options); await server.ready;
     const recovered = await server.documents!.authorize(id, actor);
-    assert.equal(recovered.exports?.['markdown-v2']?.fileId, originalFileId);
-    assert.equal(recovered.exports?.['markdown-v2']?.attempt?.saved, true);
+    assert.equal(recovered.exports?.['markdown-v3']?.fileId, originalFileId);
+    assert.equal(recovered.exports?.['markdown-v3']?.attempt?.saved, true);
     assert.equal(recovered.markdownFileId, undefined);
     assert.equal(recovered.requestedMode, 'markdown');
     assert.equal(allocations(api).length, 1, 'restart must reuse the remotely completed file ID');

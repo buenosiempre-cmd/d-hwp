@@ -36,7 +36,7 @@ test('D-HWP command and signed Markdown action share actual content in the sourc
     const cardMessage=server.api.calls.find(c=>c.method==='chat.postMessage')!;
     const id=(cardMessage.args.metadata as any).entities[0].external_ref.id;
     const card=await server.documents!.authorize(id,actor);
-    assert.equal(card.exports?.['markdown-v2']?.attempt?.saved,true);assert.equal(card.markdownFileId,undefined);
+    assert.equal(card.exports?.['markdown-v3']?.attempt?.saved,true);assert.equal(card.markdownFileId,undefined);
     const payload={type:'block_actions',api_app_id:'ATEST',team:{id:'TTEST'},user:{id:'UTEST'},channel:{id:'CTEST'},container:{type:'message',channel_id:'CTEST',message_ts:card.messageTs},actions:[{type:'button',action_id:'rhwp_export_markdown',value:id,action_ts:'888.001'}]};
     await signed(server.origin,payload);await until(()=>server.api.calls.some(c=>c.method==='chat.postEphemeral'&&String(c.args.text).includes('Markdown')));
     assert.equal(mdUploads(server.api).length,1);assert.equal(conversions,1);
@@ -71,7 +71,7 @@ function cloudFixture(){
 test('Cloud Markdown command persists its mode and receipt across workers without content or signed upload URLs',async()=>{
   const f=cloudFixture();try{
     const id=await f.make().submit({...actor,threadTs:'100.001'},'FTEST','md-command','markdown');await f.drain();
-    const card=await f.make().authorize(id,actor);assert.ok(card.exports?.['markdown-v2']?.fileId);assert.equal(card.exports?.['markdown-v2']?.attempt?.saved,true);assert.equal(card.markdownFileId,undefined);assert.equal(f.conversions,1);
+    const card=await f.make().authorize(id,actor);assert.ok(card.exports?.['markdown-v3']?.fileId);assert.equal(card.exports?.['markdown-v3']?.attempt?.saved,true);assert.equal(card.markdownFileId,undefined);assert.equal(f.conversions,1);
     await f.make().exportMarkdown(id,actor,card.messageTs!);assert.equal(f.conversions,1);assert.equal(mdUploads(f.api).length,1);
     const completion=f.api.calls.find(c=>c.method==='files.completeUploadExternal'&&c.args.channel_id);assert.equal(completion?.args.thread_ts,'100.001');
     const persisted=JSON.stringify(await f.store.list('cards'));assert.equal(persisted.includes('/upload/v1/'),false);assert.equal(persisted.includes('합성 테스트 본문'),false);
@@ -86,7 +86,7 @@ test('local Markdown creates a versioned ZIP instead of reusing a legacy text-on
     const card=await server.documents!.authorize(id,actor);Object.assign(card,structuredClone(legacyReceipt));server.documents!.checkpoint();
     const fresh=await server.documents!.exportMarkdown(id,actor,card.messageTs!);
     assert.notEqual(fresh.id,legacyReceipt.markdownFileId);assert.equal(mdUploads(server.api).length,1);assert.equal(conversions,1);
-    assert.equal(card.exports?.['markdown-v2']?.fileId,fresh.id);assert.equal(card.exports?.['markdown-v2']?.attempt?.saved,true);
+    assert.equal(card.exports?.['markdown-v3']?.fileId,fresh.id);assert.equal(card.exports?.['markdown-v3']?.attempt?.saved,true);
     assert.equal(card.markdownFileId,legacyReceipt.markdownFileId);
     assert.equal((await server.documents!.exportMarkdown(id,actor,card.messageTs!)).id,fresh.id);
     assert.equal(mdUploads(server.api).length,1);assert.equal(conversions,1);
@@ -99,7 +99,7 @@ test('Cloud Markdown ignores a persisted legacy text-only receipt and reuses onl
     await f.store.atomic<Card,void>('cards',id,current=>{assert.ok(current);return {value:{...current,...structuredClone(legacyReceipt)},result:undefined};});
     const card=await f.make().authorize(id,actor);const fresh=await f.make().exportMarkdown(id,actor,card.messageTs!);
     assert.notEqual(fresh.id,legacyReceipt.markdownFileId);assert.equal(mdUploads(f.api).length,1);assert.equal(f.conversions,1);
-    const saved=await f.make().authorize(id,actor);assert.equal(saved.exports?.['markdown-v2']?.fileId,fresh.id);assert.equal(saved.exports?.['markdown-v2']?.attempt?.saved,true);
+    const saved=await f.make().authorize(id,actor);assert.equal(saved.exports?.['markdown-v3']?.fileId,fresh.id);assert.equal(saved.exports?.['markdown-v3']?.attempt?.saved,true);
     assert.equal(saved.markdownFileId,legacyReceipt.markdownFileId);
     assert.equal((await f.make().exportMarkdown(id,actor,card.messageTs!)).id,fresh.id);assert.equal(mdUploads(f.api).length,1);assert.equal(f.conversions,1);
   }finally{f.close();}

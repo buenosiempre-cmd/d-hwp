@@ -17,7 +17,7 @@ try{
  const manifest=JSON.parse(await readFile('.cache/conversion/runtime.json','utf8'));
  const pinned=new Map();
  const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
- for(const path of ['node_modules/@rhwp/core/rhwp_bg.wasm','node_modules/@rhwp/core/rhwp.js',...['fonts.json','print.js','pdf-child.mjs','runtime-child.mjs'].map(name=>'.cache/conversion/'+name)]){
+ for(const path of ['src/conversion/ocr.mjs','node_modules/@rhwp/core/rhwp_bg.wasm','node_modules/@rhwp/core/rhwp.js',...['fonts.json','print.js','pdf-child.mjs','runtime-child.mjs'].map(name=>'.cache/conversion/'+name)]){
   const bytes=await readFile(path);if(digest(bytes)!==manifest.hashes[path])throw new Error('build mismatch');pinned.set(path,bytes);
  }
  const start=performance.now();metric('wasm_compile','start');
@@ -31,12 +31,12 @@ try{
   if(active||stopping||request?.type!=='convert'){void stop();return;}
   active=true;
   void (async()=>{
-   const {mode,start,end,bytes}=request;
+   const {mode,start,end,bytes,ocr}=request;
    if(!Buffer.isBuffer(bytes)||bytes.length>20*1024*1024||!['pdf','preview','images','selected','markdown','markdown-package','text'].includes(mode)||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>10)throw new Error('request');
    const selectedPages=mode==='selected'?normalizeSelectedPages(request.selectedPages):undefined;
    const workerStart=performance.now();metric('process_start','start');
    // Each thread gets new JS bindings, WASM instance/memory and copied assets. No SharedArrayBuffer.
-   const worker=new Worker(resolve('.cache/conversion/pdf-child.mjs'),{execArgv:[],env:workerEnvironment(),stdout:true,stderr:true,resourceLimits:{maxOldGenerationSizeMb:512},workerData:{mode,start,end,selectedPages,bytes,module,fontManifest,fontBytes,print,browserWs}});
+   const worker=new Worker(resolve('.cache/conversion/pdf-child.mjs'),{execArgv:[],env:workerEnvironment(),stdout:true,stderr:true,resourceLimits:{maxOldGenerationSizeMb:512},workerData:{mode,start,end,selectedPages,bytes,ocr,module,fontManifest,fontBytes,print,browserWs}});
    worker.once('online',()=>metric('process_start','finish',workerStart));
    let failure;
    worker.on('message',value=>{if(value?.phase==='failed')failure=value;send({type:'metric',value});});worker.stderr.resume();

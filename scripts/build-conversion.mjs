@@ -33,7 +33,7 @@ const editor=JSON.parse(await readFile('node_modules/@rhwp/editor/package.json',
 const upstream=JSON.parse(await readFile('studio/upstream.json','utf8'));
 if(core.version!==editor.version||core.version!==upstream.version)throw new Error('core/editor/Studio versions must match');
 const digest=data=>createHash('sha256').update(data).digest('hex');
-const inputs=['node_modules/@rhwp/core/rhwp_bg.wasm','node_modules/@rhwp/core/rhwp.js',...['fonts.json','print.js','pdf-child.mjs','runtime-child.mjs'].map(name=>'.cache/conversion/'+name)];
+const inputs=['src/conversion/ocr.mjs','node_modules/@rhwp/core/rhwp_bg.wasm','node_modules/@rhwp/core/rhwp.js',...['fonts.json','print.js','pdf-child.mjs','runtime-child.mjs'].map(name=>'.cache/conversion/'+name)];
 const hashes=Object.fromEntries(await Promise.all(inputs.map(async path=>[path,digest(await readFile(path))])));
 const playwright=JSON.parse(await readFile('node_modules/@playwright/test/package.json','utf8')).version;
 const identity={schema:1,core:core.version,studioCommit:upstream.commit,playwright,node:process.version,hashes};

@@ -102,7 +102,7 @@ export class CloudApplication {
     return this.exportFile(id,actor,messageTs,{format:'markdown'},task);
   }
   async exportFile(id:string,actor:Actor,messageTs:string,value:ExportRequest,task?:TaskContext):Promise<{id:string;url?:string}>{
-    const request=normalizeExportRequest(value),key=exportKey(request);
+    const normalized=normalizeExportRequest(value),request:ExportRequest=normalized.format==='markdown'?{format:'markdown',...(this.config.markdownOcr?{ocr:true}:{})}:normalized,key=exportKey(request);
     await this.authorize(id,actor,task);
     return this.locked(id,async(card,lease)=>{
       const context:LeaseContext={...lease,signal:AbortSignal.any([lease.signal,...(task?[task.signal]:[])]),checkpoint:async()=>{await lease.checkpoint();await task?.checkpoint();}};
@@ -129,7 +129,8 @@ export class CloudApplication {
         if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_TEXT_BYTES)throw new UserError('export_output','TXT 변환 결과를 확인할 수 없습니다.');
         try{new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{throw new UserError('export_output','TXT 변환 결과를 확인할 수 없습니다.');}
       }else if(request.format==='markdown'){
-        const result=await (this.options.markdown??convertMarkdownPackage)(source,{timeoutMs:120_000,signal:context.signal});bytes=result.zip;
+        const result=await (this.options.markdown??convertMarkdownPackage)(source,{timeoutMs:120_000,signal:context.signal,ocr:this.config.markdownOcr});bytes=result.zip;
+        if(this.config.markdownOcr&&!['complete','not_needed'].includes(String((result.report?.ocr as {runtimeStatus?:string}|undefined)?.runtimeStatus)))throw new UserError('conversion_ocr_unavailable','그림 OCR 실행 환경을 확인하지 못했습니다. 관리자 확인 후 같은 카드에서 다시 요청해 주세요.');
         if(!Buffer.isBuffer(result.markdown)||!result.markdown.length||result.markdown.length>MAX_MARKDOWN_BYTES||!result.report||result.report.schemaVersion!==1||!Buffer.isBuffer(bytes)||bytes.length<22||bytes.length>MAX_MARKDOWN_PACKAGE_BYTES||bytes.readUInt32LE(0)!==0x04034b50)throw new UserError('markdown_output','문서 Markdown 패키지를 확인할 수 없습니다.');
       }else{
         const result=await (this.options.zip??convertPageZip)(source,{pages:request.pages,timeoutMs:120_000,signal:context.signal});

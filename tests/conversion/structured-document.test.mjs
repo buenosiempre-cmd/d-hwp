@@ -53,11 +53,12 @@ for(const format of ['hwp','hwpx']){
     const f=await fixture(),result=await convertMarkdownPackage(f[format],{timeoutMs:120_000,onPage:()=>assert.fail('package must not publish partial PNGs')});
     assert.ok(result.zip.length<=MAX_MARKDOWN_PACKAGE_BYTES);
     const entries=readArchive(result.zip),sourceName=`source/original.${format}`;
+    assert.match(entries.get('README.md').toString(),/문서 읽기와 대조 안내/);
     assert.deepEqual(entries.get('document.md'),result.markdown);
     assert.deepEqual(entries.get(sourceName),f[format],'the original is preserved byte for byte');
     const report=JSON.parse(entries.get('report.json').toString('utf8'));
     assert.deepEqual(report,result.report);
-    assert.equal(report.schemaVersion,1);
+    assert.equal(report.schemaVersion,1);assert.equal(report.packageVersion,3);
     assert.deepEqual(report.source,{format,bytes:f[format].length,sha256:sha256(f[format])},'the audit report identifies the exact source bytes');
     assert.equal(report.coverage.unaccountedTextNodes,0);
     assert.equal(report.coverage.xmlTextNodes,report.coverage.renderedTextNodes);
