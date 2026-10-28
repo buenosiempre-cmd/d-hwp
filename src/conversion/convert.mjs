@@ -7,7 +7,7 @@ import {workerEnvironment} from './worker-env.mjs';
 import {readFrames,OutputError} from './frames.mjs';
 import {normalizeSelectedPages} from './selection.mjs';
 import {pageZip} from './zip.mjs';
-export {MAX_PDF_BYTES,MAX_PNG_BYTES,MAX_PNG_TOTAL_BYTES,MAX_PREVIEW_PAGES,MAX_MARKDOWN_BYTES,MAX_TEXT_BYTES,MAX_ZIP_BYTES} from './frames.mjs';
+export {MAX_PDF_BYTES,MAX_PNG_BYTES,MAX_PNG_TOTAL_BYTES,MAX_PREVIEW_PAGES,MAX_MARKDOWN_BYTES,MAX_TEXT_BYTES,MAX_ZIP_BYTES,MAX_MARKDOWN_PACKAGE_BYTES,MAX_MARKDOWN_REPORT_BYTES} from './frames.mjs';
 const METRIC_STAGES=new Set(['wasm_compile','runtime_reuse','browser_start','process_start','input','wasm_init','parse','markdown','text','svg_render','fonts_prepare','browser_render','dom_prepare','page_attach','fonts_ready','pdf','png','output']);
 export class ConversionError extends Error {constructor(code,message,stage){super(message);this.code=code;this.stage=stage;}}
 export function validMetric(value){
@@ -25,6 +25,7 @@ export function validMetric(value){
 }
 export function convertPdf(bytes,options={}){return convert(bytes,options,'pdf',0,0);}
 export function convertMarkdown(bytes,options={}){return convert(bytes,options,'markdown',0,0);}
+export function convertMarkdownPackage(bytes,options={}){return convert(bytes,options,'markdown-package',0,0);}
 export function convertText(bytes,options={}){return convert(bytes,options,'text',0,0);}
 export function convertSelectedPageImages(bytes,{pages,...options}={}){
   let selection;

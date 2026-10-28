@@ -32,7 +32,7 @@ try{
   active=true;
   void (async()=>{
    const {mode,start,end,bytes}=request;
-   if(!Buffer.isBuffer(bytes)||bytes.length>20*1024*1024||!['pdf','preview','images','selected','markdown','text'].includes(mode)||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>10)throw new Error('request');
+   if(!Buffer.isBuffer(bytes)||bytes.length>20*1024*1024||!['pdf','preview','images','selected','markdown','markdown-package','text'].includes(mode)||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>10)throw new Error('request');
    const selectedPages=mode==='selected'?normalizeSelectedPages(request.selectedPages):undefined;
    const workerStart=performance.now();metric('process_start','start');
    // Each thread gets new JS bindings, WASM instance/memory and copied assets. No SharedArrayBuffer.

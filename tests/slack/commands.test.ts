@@ -9,7 +9,7 @@ test('command aliases preserve conversion and editing intent with Korean Slack f
   for(const [cmd,mode] of [['open','open'],['edit','open'],['pdf','pdf'],['png','png'],['md','markdown'],['markdown','markdown']])assert.deepEqual(parseCommand(`${cmd} <${link}|업무 보고.hwp>`,config.workspaceHost),{kind:'prepare',mode,fileId:'FTEST'});
   assert.deepEqual(parseCommand('',config.workspaceHost),{kind:'help'});
   assert.deepEqual(parseCommand('help',config.workspaceHost),{kind:'help'});
-  assert.match(HELP,/D-HWP/);assert.match(HELP,/\/dhwp png.*앞 10쪽/);assert.match(HELP,/\/dhwp md.*원문/);
+  assert.match(HELP,/D-HWP/);assert.match(HELP,/\/dhwp png.*앞 10쪽/);assert.match(HELP,/\/dhwp md.*Markdown.*ZIP/);
   assert.match(HELP,/편집본은 새 파일로 저장/);
   for(const text of ['png x --page 3','thumbnail x','open','unknown x','help extra'])assert.throws(()=>parseCommand(text,config.workspaceHost));
 });

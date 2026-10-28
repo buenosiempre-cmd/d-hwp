@@ -10,7 +10,7 @@ import {SharedSessions} from './cloud/sessions';
 import type {MetadataStore} from './cloud/metadata';
 import {Uploads,savedAttempt,type UploadAttempt} from './uploads';
 import type {PageImages,PageImage} from '../conversion/convert.mjs';
-import {convertMarkdown,MAX_MARKDOWN_BYTES,convertText,convertPageZip,MAX_TEXT_BYTES,MAX_ZIP_BYTES} from '../conversion/convert.mjs';
+import {convertMarkdownPackage,MAX_MARKDOWN_BYTES,MAX_MARKDOWN_PACKAGE_BYTES,convertText,convertPageZip,MAX_TEXT_BYTES,MAX_ZIP_BYTES} from '../conversion/convert.mjs';
 import {normalizeExportRequest,exportKey,exportName,savedExports,MAX_DOCUMENT_EXPORTS,type ExportRequest,type ExportReceipt} from './document-exports';
 import {PdfJobs} from './pdf-jobs';
 import type {State} from './state';
@@ -31,9 +31,8 @@ export interface Card {
 export class Documents {
   readonly sessions:SessionAccess; readonly uploads:Uploads; readonly pdf:PdfJobs;
   private cards=new Map<string,Card>(); private closed=false;
-  private markdownWork=new Map<string,Promise<{id:string;url?:string}>>();
   private exportWork=new Map<string,Promise<{id:string;url?:string}>>();
-  constructor(private config:Config,private api:SlackApi,private preparations:Preparations,private options:{state?:State;sessionStore?:MetadataStore;complete?:(card:Card)=>Promise<void>;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof PdfJobs>[0];convertImages?:ConstructorParameters<typeof PdfJobs>[1];markdown?:typeof convertMarkdown;text?:typeof convertText;zip?:typeof convertPageZip}={}) {
+  constructor(private config:Config,private api:SlackApi,private preparations:Preparations,private options:{state?:State;sessionStore?:MetadataStore;complete?:(card:Card)=>Promise<void>;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof PdfJobs>[0];convertImages?:ConstructorParameters<typeof PdfJobs>[1];markdown?:typeof convertMarkdownPackage;text?:typeof convertText;zip?:typeof convertPageZip}={}) {
     this.now=options.now??Date.now;
     const checkSession=async(id:string,actor:Actor)=>{await this.authorize(id,actor);};
     this.sessions=options.sessionStore?new SharedSessions(options.sessionStore,checkSession,this.now):new Sessions(this.now,checkSession);
@@ -82,7 +81,7 @@ export class Documents {
     for(const card of this.cards.values()){
       if(!card.messageTs)continue;
       try{
-        if(card.requestedMode==='markdown'&&!card.markdownAttempt?.saved)await this.exportMarkdown(card.id,card.actor,card.messageTs);
+        if(card.requestedMode==='markdown'&&!card.exports?.['markdown-v2']?.attempt?.saved)await this.exportMarkdown(card.id,card.actor,card.messageTs);
         if(card.requestedMode==='png'&&card.pdf==='ready'&&card.imageState==='ready'&&(card.images?.length??0)<Math.min(10,card.pageCount??0))await this.morePages(card.id,card.actor,card.messageTs);
       }catch{/* Preserve receipts and allow a member to retry from the document card. */}
     }
@@ -138,23 +137,8 @@ export class Documents {
     if(job.mode==='markdown')await this.exportMarkdown(card.id,job.actor,card.messageTs!);
   }
   async exportMarkdown(id:string,actor:Actor,messageTs:string):Promise<{id:string;url?:string}>{
-    const card=await this.authorize(id,actor);if(card.messageTs!==messageTs)denied();
-    const existing=this.markdownWork.get(id);
-    if(existing){const result=await existing;await this.authorize(id,actor);return result;}
-    const work=(async()=>{
-      if(card.markdownFileId&&card.markdownAttempt?.saved)return {id:card.markdownFileId,url:card.markdownUrl};
-      const source=await this.ensureSource(id,actor);
-      const bytes=await (this.options.markdown??convertMarkdown)(source,{timeoutMs:120_000});
-      if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_MARKDOWN_BYTES)throw new UserError('markdown_output','Markdown 변환 결과를 확인할 수 없습니다.');
-      await this.authorize(id,actor);
-      const destination={...actor,threadTs:card.actor.threadTs??card.messageTs};
-      const result=await this.uploads.share(card.markdownAttempt??={},bytes,card.name.replace(/\.(hwp|hwpx)$/i,'').slice(0,170)+'.md',destination,async()=>{await this.authorize(id,actor);});
-      card.markdownFileId=result.id;card.markdownUrl=result.url;this.checkpoint();
-      await this.update(card,actor).catch(()=>{});
-      return result;
-    })();
-    this.markdownWork.set(id,work);
-    try{return await work;}finally{if(this.markdownWork.get(id)===work)this.markdownWork.delete(id);}
+    // Legacy text-only .md receipts deliberately cannot satisfy a v2 request.
+    return this.exportFile(id,actor,messageTs,{format:'markdown'});
   }
   async exportFile(id:string,actor:Actor,messageTs:string,input:ExportRequest):Promise<{id:string;url?:string}>{
     const request=normalizeExportRequest(input),key=exportKey(request),workKey=id+':'+key;
@@ -179,6 +163,9 @@ export class Documents {
         bytes=await (this.options.text??convertText)(source,{timeoutMs:120_000});
         if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_TEXT_BYTES)throw new UserError('export_output','TXT 변환 결과를 확인할 수 없습니다. 텍스트가 없거나 2 MiB를 넘는 문서일 수 있습니다.');
         try{new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{throw new UserError('export_output','TXT 문자 인코딩을 확인할 수 없습니다.');}
+      }else if(request.format==='markdown'){
+        const result=await (this.options.markdown??convertMarkdownPackage)(source,{timeoutMs:120_000});bytes=result.zip;
+        if(!Buffer.isBuffer(result.markdown)||!result.markdown.length||result.markdown.length>MAX_MARKDOWN_BYTES||!result.report||result.report.schemaVersion!==1||!Buffer.isBuffer(bytes)||bytes.length<22||bytes.length>MAX_MARKDOWN_PACKAGE_BYTES||bytes.readUInt32LE(0)!==0x04034b50)throw new UserError('markdown_output','문서 Markdown 패키지를 확인할 수 없습니다.');
       }else{
         const result=await (this.options.zip??convertPageZip)(source,{pages:request.pages,timeoutMs:120_000});
         bytes=result.zip;
@@ -285,5 +272,5 @@ export class Documents {
     for(const [id,c] of this.cards)if(c.actor.teamId===team&&(c.fileId===file||c.rootFileId===file)&&!keep?.has(c.actor.channelId)){this.preparations.invalidateCard(id);this.cards.delete(id);this.options.state?.delete('cards',id);await this.sessions.invalidate(id);}
   }
   sweep():void {for(const [id,c] of this.cards)if(!this.options.state&&this.now()-c.createdAt>=24*60*60_000){this.cards.delete(id);void Promise.resolve(this.sessions.invalidate(id)).catch(()=>{});}this.sessions.sweep();}
-  async close():Promise<void>{await Promise.allSettled([...this.cards.values()].map(c=>c.imageWork).concat([...this.markdownWork.values(),...this.exportWork.values()].map(p=>p.then(()=>{}))));await this.pdf.close();this.checkpoint();this.closed=true;this.cards.clear();this.sessions.clear();}
+  async close():Promise<void>{await Promise.allSettled([...this.cards.values()].map(c=>c.imageWork).concat([...this.exportWork.values()].map(p=>p.then(()=>{}))));await this.pdf.close();this.checkpoint();this.closed=true;this.cards.clear();this.sessions.clear();}
 }

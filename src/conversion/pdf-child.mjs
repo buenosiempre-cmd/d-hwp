@@ -3,8 +3,11 @@ import init, { HwpDocument } from '@rhwp/core';
 import { chromium } from '@playwright/test';
 import {workerData,parentPort} from 'node:worker_threads';
 import {once} from 'node:events';
+import {createHash} from 'node:crypto';
 import {ConversionFailure} from './failures.mjs';
-import {markdownFromUnicode} from './markdown.mjs';
+import {extractStructuredMarkdown} from './structured-markdown.mjs';
+import {readArchive,writeArchive} from './archive.mjs';
+import {MAX_MARKDOWN_BYTES,MAX_MARKDOWN_REPORT_BYTES,MAX_MARKDOWN_PACKAGE_BYTES} from './frames.mjs';
 import {textFromUnicode} from './text.mjs';
 import {normalizeSelectedPages} from './selection.mjs';
 import { resolve } from 'node:path';
@@ -23,19 +26,47 @@ async function frame(info,bytes){
   await output(length);await output(json);if(bytes)await output(bytes);
 }
 const {mode,start,end,module,fontManifest,fontBytes,print,browserWs}=workerData;
-if(!['pdf','preview','images','selected','markdown','text'].includes(mode)||(['preview','images'].includes(mode)&&(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<1||end<start||end>10)))throw new Error('range');
+if(!['pdf','preview','images','selected','markdown','markdown-package','text'].includes(mode)||(['preview','images'].includes(mode)&&(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<1||end<start||end>10)))throw new Error('range');
 try {
   const selectedPages=mode==='selected'?normalizeSelectedPages(workerData.selectedPages):undefined;
   const bytes=workerData.bytes;validateInput(bytes);
+  const isMarkdown=mode==='markdown'||mode==='markdown-package';
+  const sourceFormat=bytes[0]===0x50?'hwpx':'hwp';
+  // Bound a ZIP container before passing it to the document engine.
+  if(isMarkdown&&sourceFormat==='hwpx')readArchive(bytes);
   begin('wasm_init');
   await init({module_or_path:module});
   begin('parse');
   doc=new HwpDocument(bytes);
   const count=doc.pageCount();pageCount=count;if(count<1||count>MAX_PAGES)throw new ConversionFailure('page_count');
   if(selectedPages?.some(page=>page>count))throw new ConversionFailure('page_selection');
-  if(mode==='markdown'||mode==='text') {
-    begin(mode);
-    const text=(mode==='text'?textFromUnicode:markdownFromUnicode)(doc.getTextFileUnicode());
+  if(isMarkdown) {
+    begin('markdown');
+    let hwpx=bytes,engineLoss;
+    if(sourceFormat==='hwp'){
+      const exported=doc.exportHwpxWithReport();
+      try{
+        if(!exported.hasBytes())throw new ConversionFailure('markdown_structure');
+        engineLoss=JSON.parse(exported.contentLoss());hwpx=exported.takeBytes();
+      }finally{exported.free();}
+    }
+    const extracted=extractStructuredMarkdown({hwpx,sourceFormat,pageCount:count,engineLoss,unicode:JSON.parse(doc.getTextFileUnicode()),controls:JSON.parse(doc.getControls())});
+    const suffix=`\n\n## 함께 확인할 파일\n\n- [원본 문서](source/original.${sourceFormat})\n- [추출 대조 보고서](report.json)\n${sourceFormat==='hwp'?'- [엔진이 해석한 HWPX 구조](source/structure.hwpx)\n':''}\n이 Markdown의 이미지와 위 파일은 함께 제공된 ZIP 안에 있습니다. 그림 속 글자와 시각적 의미는 자동 판독하지 않았습니다.\n`;
+    const markdown=Buffer.concat([extracted.markdown,Buffer.from(suffix)]);
+    if(markdown.length>MAX_MARKDOWN_BYTES)throw new ConversionFailure('markdown_size');
+    const report={...extracted.report,schemaVersion:1,packageVersion:2,source:{format:sourceFormat,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}};
+    const reportBytes=Buffer.from(JSON.stringify(report,null,2));
+    if(reportBytes.length>MAX_MARKDOWN_REPORT_BYTES)throw new ConversionFailure('markdown_package_size');
+    begin('output');await frame({type:'document',pageCount:count});
+    await frame({type:'markdown',bytes:markdown.length},markdown);
+    if(mode==='markdown-package'){
+      const zip=writeArchive([{name:'document.md',bytes:markdown},{name:'report.json',bytes:reportBytes},{name:`source/original.${sourceFormat}`,bytes},...(sourceFormat==='hwp'?[{name:'source/structure.hwpx',bytes:hwpx}]:[]),...extracted.assets.map(({name,bytes})=>({name,bytes}))],{maxBytes:MAX_MARKDOWN_PACKAGE_BYTES});
+      await frame({type:'report',bytes:reportBytes.length},reportBytes);
+      await frame({type:'archive',bytes:zip.length},zip);
+    }
+  } else if(mode==='text') {
+    begin('text');
+    const text=textFromUnicode(doc.getTextFileUnicode());
     begin('output');
     await frame({type:'document',pageCount:count});
     await frame({type:mode,bytes:text.length},text);

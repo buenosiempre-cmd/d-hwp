@@ -28,7 +28,7 @@ test('a verified invitation enables a new channel, welcomes once, and survives r
   try{
     const settings=new Settings(empty,api,state);assert.equal(settings.mode('CNEW'),'off');
     await settings.joined('CNEW','UBOT');assert.equal(settings.mode('CNEW'),'auto');assert.ok(settings.enabled.has('CNEW'));
-    const welcome=api.calls.filter(c=>c.method==='chat.postMessage');assert.equal(welcome.length,1);assert.equal(welcome[0].args.channel,'CNEW');assert.match(JSON.stringify(welcome[0].args),/원문 Markdown/);
+    const welcome=api.calls.filter(c=>c.method==='chat.postMessage');assert.equal(welcome.length,1);assert.equal(welcome[0].args.channel,'CNEW');assert.match(JSON.stringify(welcome[0].args),/문서 Markdown/);
     for(const text of ['형식·쪽 선택','TXT','PNG ZIP'])assert.ok(JSON.stringify(welcome[0].args).includes(text));
     assert.equal(api.calls.some(c=>c.method==='conversations.members'),false);
     await settings.joined('CNEW','UBOT');assert.equal(api.calls.filter(c=>c.method==='chat.postMessage').length,1);

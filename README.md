@@ -1,6 +1,6 @@
 # D-HWP · 동국 한글문서 도우미
 
-**Slack에 올린 HWP·HWPX를 PDF, PNG 이미지, 원문 Markdown·TXT로 변환하고 선택 쪽 이미지를 ZIP으로 받습니다.**
+**Slack에 올린 HWP·HWPX를 PDF, PNG 이미지, 문서 Markdown 패키지·TXT로 변환하고 선택 쪽 이미지를 ZIP으로 받습니다.**
 
 동국대학교 구성원의 문서 업무 개선을 위한 CoP 시제품입니다. [RHWP for Slack](https://github.com/postmelee/rhwp-slack)을 포크해 동국대학교 업무 흐름에 맞추고 있으며, [rhwp](https://github.com/edwardkim/rhwp) core/editor/Studio **0.8.7**을 사용합니다. 기존 RHWP 문서 편집 기능도 유지합니다.
 
@@ -10,7 +10,7 @@
 
 1. 사용할 채널에 D-HWP 앱을 초대하고 HWP·HWPX 파일을 올립니다. 채널 ID를 미리 등록할 필요가 없습니다.
 2. 파일 메시지 메뉴에서 **동국 한글문서 변환**을 선택하거나 D-HWP를 멘션합니다. 자동 감지가 켜진 채널에서는 업로드로 시작할 수 있습니다.
-3. 결과 카드에서 **PDF 열기**, **PNG 이미지 (앞 10쪽)**, **원문 Markdown 만들기**를 선택합니다. 결과는 Slack의 해당 스레드에 공유합니다.
+3. 결과 카드에서 **PDF 열기**, **PNG 이미지 (앞 10쪽)**, **문서 Markdown (ZIP)**를 선택합니다. 결과는 Slack의 해당 스레드에 공유합니다.
 4. **형식·쪽 선택**에서 원문 TXT 또는 필요한 쪽의 PNG ZIP을 받습니다. ZIP 쪽 입력 예: `1,3-5,12`. 한 번에 최대 10쪽입니다.
 5. 수정이 필요하면 **문서 편집 (RHWP)**으로 열고 새 편집본을 저장합니다. 원본 파일을 덮어쓰지 않습니다.
 
@@ -18,12 +18,12 @@
 |---|---|
 | `/dhwp pdf <Slack 파일 링크>` | PDF 변환 |
 | `/dhwp png <Slack 파일 링크>` | 앞 10쪽까지 PNG 이미지 |
-| `/dhwp md <Slack 파일 링크>` | 원문 텍스트를 담은 `.md` 파일; `markdown`도 가능 |
+| `/dhwp md <Slack 파일 링크>` | `document.md`·그림·원본·대조 보고서를 담은 ZIP; `markdown`도 가능 |
 | `/dhwp open <Slack 파일 링크>` | 문서 카드와 RHWP 편집 연결; `edit`도 가능 |
 | `/dhwp help` | 사용법 |
 | `/dhwp settings` | 관리자용 채널 설정 |
 
-기본 미리보기는 PDF와 첫 3쪽 이미지입니다. 갤러리는 앞 10쪽까지 제공합니다. 그 이후 쪽도 **형식·쪽 선택 → 선택 쪽 PNG ZIP**으로 받을 수 있습니다(문서 전체 200쪽 이내, 선택 최대 10쪽). **원문 Markdown은 문서에서 추출한 텍스트이며 AI 요청문과 다릅니다.** AI 호출 없이 생성하고, 제목·표·줄바꿈·그림·서명·쪽 배치를 원본과 동일하게 복원하지는 않습니다. 스캔 그림의 OCR는 지원하지 않습니다.
+기본 미리보기는 PDF와 첫 3쪽 이미지입니다. 갤러리는 앞 10쪽까지 제공합니다. 그 이후 쪽도 **형식·쪽 선택 → 선택 쪽 PNG ZIP**으로 받을 수 있습니다(문서 전체 200쪽 이내, 선택 최대 10쪽). **문서 Markdown ZIP**에는 본문·병합/중첩 표·각주/미주·머리말/꼬리말·글상자·수식 원문·필드/링크 정보, 그림 파일, 원본, `report.json`이 들어갑니다. AI 호출 없이 생성합니다. 그림 속 글자 OCR과 시각적 의미, HWP 엔진이 인식하지 못한 내용까지 완전하게 읽었다고 보장하지 않습니다. [구조 추출과 Kordoc 대조 범위](docs/d-hwp-markdown.md)를 확인하세요.
 
 새 앱은 `/dhwp`를 등록합니다. 서버는 기존 `/rhwp` 요청도 호환 처리하지만 새 manifest에 중복 등록하지 않아 기존 rhwp 앱의 명령을 가로채지 않습니다.
 
@@ -48,7 +48,7 @@ node --env-file=/absolute/private/d-hwp-slack.env --import tsx src/server/main.t
 ## 처리 범위와 정보 보호
 
 - 입력은 파일당 **20 MiB·200쪽**까지입니다. HWP3·암호화 파일은 지원하지 않습니다.
-- PDF는 최대 50 MiB, PNG는 쪽당 5 MiB·선택 합계 25 MiB, ZIP은 26 MiB, Markdown·TXT는 각각 2 MiB입니다.
+- PDF는 최대 50 MiB, PNG는 쪽당 5 MiB·선택 합계 25 MiB, PNG ZIP은 26 MiB입니다. Markdown·TXT는 각각 2 MiB, Markdown 보고서는 2 MiB, 포함 개체 합계는 25 MiB, 전체 Markdown ZIP은 50 MiB까지입니다. 한도를 넘으면 잘라내지 않고 실패로 안내합니다.
 - 선택한 쪽 중 문서를 벗어나는 번호가 있으면 전체 요청을 거부합니다. 같은 카드의 같은 형식·쪽 선택은 기존 결과를 재사용하며, 서로 다른 내보내기는 카드당 최대 20개입니다.
 - TXT는 문서의 추출 가능한 원문 텍스트입니다. 표의 셀 내용은 포함될 수 있지만 표 배치·그림·서명·수식·스캔 OCR은 보존하지 않습니다.
 - Slack 원본은 변환 서버로 내려받아 메모리에서 처리하고 결과를 Slack에 업로드합니다. 요청자·채널·원본 파일 접근 권한을 다시 확인합니다.
@@ -79,7 +79,8 @@ npm run test:desk
 - [Slack 설치·배포 안내](docs/d-hwp-slack.md)
 - [규정 MCP 설정](docs/d-hwp-mcp.md)
 - [구성원 업무 편의 개선](docs/d-hwp-upgrades.md)
-- [이번 업그레이드 계획](mydocs/plans/task_m001_9.md)
+- [문서 구조 Markdown과 Kordoc 대조](docs/d-hwp-markdown.md)
+- [이번 업그레이드 계획](mydocs/plans/task_m001_11.md)
 - [기반 프로젝트 개발 문서](docs/README.md): upstream 운영 이력은 D-HWP 배포 설정으로 재사용하지 않습니다.
 
 ## 출처와 라이선스
