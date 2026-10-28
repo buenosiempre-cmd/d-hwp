@@ -37,10 +37,10 @@ export class EditorApi extends FakeApi {
     return super.response(method,args);
   }
 }
-export async function editorServer(options:{sessionStore?:import('../../src/server/cloud/metadata').MetadataStore;api?:EditorApi;convert?:NonNullable<Parameters<typeof createSlackReceiver>[3]>['convert'];convertImages?:NonNullable<Parameters<typeof createSlackReceiver>[3]>['convertImages'];markdown?:NonNullable<Parameters<typeof createSlackReceiver>[3]>['markdown'];fetcher?:typeof fetch;now?:()=>number;origin?:string;statePath?:string;adminIds?:ReadonlySet<string>;reactions?:boolean}={}){
+export async function editorServer(options:{sessionStore?:import('../../src/server/cloud/metadata').MetadataStore;api?:EditorApi;convert?:NonNullable<Parameters<typeof createSlackReceiver>[3]>['convert'];convertImages?:NonNullable<Parameters<typeof createSlackReceiver>[3]>['convertImages'];markdown?:NonNullable<Parameters<typeof createSlackReceiver>[3]>['markdown'];text?:NonNullable<Parameters<typeof createSlackReceiver>[3]>['text'];zip?:NonNullable<Parameters<typeof createSlackReceiver>[3]>['zip'];fetcher?:typeof fetch;now?:()=>number;origin?:string;statePath?:string;adminIds?:ReadonlySet<string>;reactions?:boolean}={}){
   const api=options.api??new EditorApi();const publicOrigin=options.origin??'https://editor.example.com';
   const runtime=createSlackReceiver({...config,publicOrigin,statePath:options.statePath,adminIds:options.adminIds,reactions:options.reactions},api,{botId:'BBOT',botUserId:'UBOT'},
-    {sessionStore:options.sessionStore,download:async()=>bytes,markdown:options.markdown,convertImages:options.convertImages,convert:options.convert??(async()=>Buffer.from('%PDF-synthetic')),fetcher:options.fetcher??(async()=>new Response('ok')),now:options.now});
+    {sessionStore:options.sessionStore,download:async()=>bytes,markdown:options.markdown,text:options.text,zip:options.zip,convertImages:options.convertImages,convert:options.convert??(async()=>Buffer.from('%PDF-synthetic')),fetcher:options.fetcher??(async()=>new Response('ok')),now:options.now});
   const server=await runtime.receiver.start({host:'127.0.0.1',port:0});const address=server.address();if(!address||typeof address==='string')throw new Error('listen');
   const origin=`http://127.0.0.1:${address.port}`;
   return {...runtime,api,origin,publicOrigin,async prepare(){const job=runtime.preparations.submit(actor,'FTEST','open','test');await runtime.preparations.idle();return job.id;},

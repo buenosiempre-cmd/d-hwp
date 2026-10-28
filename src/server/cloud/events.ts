@@ -9,14 +9,15 @@ import type {TaskContext,TaskSpec,TerminalContext} from './tasks';
 import {notificationFailure,eventNoticeResult,errorCode,eventInputObserved,eventInputNoticeFinished} from './telemetry';
 import {AttachmentPendingError} from './error-diagnostics';
 import {Settings} from '../settings';
+import {normalizeExportRequest,type ExportRequest} from '../document-exports';
 /** A projection of a signed event. Never store the message text or the original payload. */
-export interface Input {kind:'channel_joined'|'file_shared'|'app_mention'|'file_deleted'|'file_unshared'|'home'|'retry_preview'|'more_pages'|'export_markdown';cardId?:string;messageTs?:string;actor?:Actor;fileId?:string;files?:string[];user?:string;receivedAt?:number;terminalNoticeRequested?:true;}
+export interface Input {kind:'channel_joined'|'file_shared'|'app_mention'|'file_deleted'|'file_unshared'|'home'|'retry_preview'|'more_pages'|'export_markdown'|'export_file';cardId?:string;messageTs?:string;actor?:Actor;fileId?:string;files?:string[];user?:string;request?:ExportRequest;receivedAt?:number;terminalNoticeRequested?:true;}
 export class CloudEvents {
  constructor(private application:CloudApplication,private botUserId:string,private noticeSink?:(record:Record<string,unknown>)=>void){}
  async enqueue(eventId:string,input:Input):Promise<void>{
   const app=this.application,id=createHash('sha256').update(app.config.teamId+':'+eventId).digest('hex');
   const saved=await app.store.atomic<Input,Input>('inputs',id,current=>{
-   const value=current??{...input,receivedAt:Date.now(),terminalNoticeRequested:input.kind==='app_mention'||input.kind==='export_markdown'?true as const:undefined};
+   const value=current??{...input,...(input.kind==='export_file'?{request:normalizeExportRequest(input.request)}:{}),receivedAt:Date.now(),terminalNoticeRequested:input.kind==='app_mention'||input.kind==='export_markdown'||input.kind==='export_file'?true as const:undefined};
    return {value,expiresAt:Date.now()+7*86400_000,result:value};
   });
   await app.tasks.enqueue('event:'+id,{teamId:app.config.teamId,cardId:id,kind:'event',...(saved.terminalNoticeRequested?{terminalNoticeRequested:true as const}:{})});
@@ -25,7 +26,7 @@ export class CloudEvents {
   const app=this.application,report=(status:'sent'|'failed'|'skipped'|'duplicate',error?:unknown)=>eventNoticeResult(context.id,status,error,this.noticeSink);
   if(spec.kind!=='event'||spec.teamId!==app.config.teamId||!/^[a-f0-9]{64}$/.test(context.id))return;
   const input=await app.store.get<Input>('inputs',spec.cardId),actor=input?.actor;
-  if((input?.kind!=='app_mention'&&input?.kind!=='export_markdown')||!actor||actor.teamId!==spec.teamId||actor.userId===this.botUserId||!ID.user.test(actor.userId)||!ID.channel.test(actor.channelId)){report('skipped');return;}
+  if((input?.kind!=='app_mention'&&input?.kind!=='export_markdown'&&input?.kind!=='export_file')||!actor||actor.teamId!==spec.teamId||actor.userId===this.botUserId||!ID.user.test(actor.userId)||!ID.channel.test(actor.channelId)){report('skipped');return;}
   const key=createHash('sha256').update('event-notice:'+context.id).digest('hex');
   if(await app.store.get('event_notices',key)){report('duplicate');return;}
   if(await app.mode(actor.channelId)==='off'){report('skipped');return;}
@@ -37,7 +38,8 @@ export class CloudEvents {
   const claimed=await app.store.atomic<Notice,boolean>('event_notices',key,current=>({value:current??{state:'attempted',attemptedAt},expiresAt:current?current.attemptedAt+7*86400_000:expiresAt,result:!current}));
   if(!claimed){report('duplicate');return;}
   let state:'sent'|'failed'='sent',failure:unknown;
-  try{await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:input.kind==='export_markdown'?'Markdown 변환을 완료하지 못했습니다. 원본 파일의 공유 상태를 확인하고 문서 카드에서 다시 요청해 주세요. 결과는 2 MiB까지 지원합니다.':'한글 문서 요청을 완료하지 못했습니다. 앱의 채널 참여와 파일 공유 상태를 확인한 뒤 다시 요청해 주세요. 문제가 계속되면 관리자에게 앱 연결과 권한 확인을 요청해 주세요.'},signal);}
+  const exportFailure=['conversion_page_selection','conversion_text_limit','conversion_text_empty','conversion_zip_limit'].includes(context.failureCode)?userMessage({code:context.failureCode}):'파일 내보내기를 완료하지 못했습니다. 원본의 공유 상태와 선택한 쪽을 확인하고 다시 요청해 주세요. TXT는 2 MiB, ZIP은 최대 10쪽·26 MiB까지 지원합니다.';
+  try{await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:input.kind==='export_file'?exportFailure:input.kind==='export_markdown'?'Markdown 변환을 완료하지 못했습니다. 원본 파일의 공유 상태를 확인하고 문서 카드에서 다시 요청해 주세요. 결과는 2 MiB까지 지원합니다.':'한글 문서 요청을 완료하지 못했습니다. 앱의 채널 참여와 파일 공유 상태를 확인한 뒤 다시 요청해 주세요. 문제가 계속되면 관리자에게 앱 연결과 권한 확인을 요청해 주세요.'},signal);}
   catch(error){state='failed';failure=error;}
   report(state,failure);
   // Recording a send attempt first avoids duplicate posts after ambiguous responses or crashes.
@@ -53,10 +55,16 @@ export class CloudEvents {
   const input=await app.store.get<Input>('inputs',spec.cardId);if(!input)throw new Error('Missing event');
   if(input.kind==='file_deleted'||input.kind==='file_unshared'){if(input.fileId)await app.invalidate(input.fileId,input.kind==='file_unshared');return;}
   if(input.kind==='home'){await new Settings(app.config,app.api,undefined,app.store).home(app.config.teamId,input.user!);return;}
-  if(input.kind==='retry_preview'||input.kind==='more_pages'||input.kind==='export_markdown'){
+  if(input.kind==='retry_preview'||input.kind==='more_pages'||input.kind==='export_markdown'||input.kind==='export_file'){
    const actor=input.actor!;await context.checkpoint();
    try{
-    if(input.kind==='export_markdown'){
+    if(input.kind==='export_file'){
+     const request=normalizeExportRequest(input.request),result=await app.exportFile(input.cardId!,actor,input.messageTs!,request,context);
+     await app.authorize(input.cardId!,actor,context);
+     const label=request.format==='txt'?'원문 TXT':'선택 쪽 PNG ZIP';
+     await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:result.url?`${label}을 같은 스레드에 첨부했습니다. <${result.url}|파일 열기>`:`${label}을 같은 스레드에 첨부했습니다.`},context.signal);
+    }
+    else if(input.kind==='export_markdown'){
      const result=await app.exportMarkdown(input.cardId!,actor,input.messageTs!,context);
      await app.authorize(input.cardId!,actor,context);
      await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:result.url?`원문 Markdown을 같은 스레드에 첨부했습니다. <${result.url}|Markdown 열기>`:'원문 Markdown을 같은 스레드에 첨부했습니다.'},context.signal);

@@ -11,6 +11,8 @@ import {denied,object,userMessage,UserError} from '../errors';
 import type {CloudApplication} from './application';
 import {CloudEvents} from './events';
 import {onboardChannel} from './channel-onboarding';
+import {exportView,parseExportView,type ExportSelection} from '../export-options';
+import {exportKey,type ExportRequest} from '../document-exports';
 const quietLogger:Logger={debug(){},info(){},warn(){},error(){},setLevel(){},getLevel(){return LogLevel.ERROR;},setName(){}};
 const trigger=(v:unknown)=>{if(typeof v!=='string'||!v||v.length>256)denied();return v;};
 const ts=(v:unknown)=>{if(typeof v!=='string'||!/^\d+\.\d+$/.test(v))denied();return v;};
@@ -75,6 +77,38 @@ export function createCloudReceiver(config:Config,documents:CloudApplication,ide
    if(typeof channel!=='string'||typeof mode!=='string')denied();await settings.set({teamId:body.team?.id??'',userId:body.user.id,channelId:channel},mode);
    await events.enqueue('settings-home:'+view.id+':'+view.hash,{kind:'home',user:body.user.id});await ack();
   }catch(error){await ack({response_action:'errors',errors:{channel:userMessage(error)}});}
+ });
+ app.action('rhwp_export_options',async({body,action,ack})=>{
+  let actor:Actor|undefined;
+  try{
+   const b=object(body),a=object(action),c=object(b.container);
+   if(c.type!=='message'||c.is_ephemeral===true||typeof a.value!=='string'||!a.value||a.value.length>128)denied();
+   const messageTs=ts(c.message_ts),request=trigger(b.trigger_id);
+   actor=await who(object(b.team).id,object(b.user).id,c.channel_id);
+   if((b.channel&&object(b.channel).id!==actor.channelId)||(b.message&&object(b.message).ts!==messageTs))denied();
+   const card=await documents.authorize(a.value,actor);if(card.messageTs!==messageTs)denied();
+   const id=randomUUID(),expiresAt=Date.now()+300_000;
+   await store.atomic<ExportSelection,void>('export_selections',id,()=>({value:{actor:actor!,cardId:card.id,messageTs,expiresAt},expiresAt,result:undefined}));
+   await api.call('views.open',{trigger_id:request,view:exportView(id,card.pageCount)});
+  }catch(error){if(!(error instanceof UserError))throw error;if(actor)await notice(actor,error);}
+  await ack();
+ });
+ app.view('rhwp_export_document',async({body,view,ack})=>{
+  try{
+   const id=view.private_metadata;if(typeof id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))denied();
+   type Selection=ExportSelection&{request?:ExportRequest};
+   const item=await store.get<Selection>('export_selections',id);
+   if(!item||item.expiresAt<=Date.now()||body.team?.id!==config.teamId||item.actor.teamId!==body.team?.id||item.actor.userId!==body.user.id)denied();
+   const request=parseExportView(view.state.values),card=await documents.authorize(item.cardId,item.actor);
+   if(card.messageTs!==item.messageTs)denied();
+   await store.atomic<Selection,void>('export_selections',id,current=>{
+    if(!current||current.expiresAt<=Date.now()||current.actor.teamId!==item.actor.teamId||current.actor.userId!==item.actor.userId||current.cardId!==item.cardId||current.messageTs!==item.messageTs||(current.request&&exportKey(current.request)!==exportKey(request)))denied();
+    return {value:{...current,request},expiresAt:current.expiresAt,result:undefined};
+   });
+   // Bind one selection to one durable request; queue failures must make Slack retry.
+   await events.enqueue('export-view:'+id,{kind:'export_file',actor:item.actor,cardId:item.cardId,messageTs:item.messageTs,request});
+   await ack();
+  }catch(error){if(!(error instanceof UserError))throw error;await ack({response_action:'errors',errors:{pages:userMessage(error)}});}
  });
  for(const actionId of ['rhwp_more_pages','rhwp_retry_preview','rhwp_export_markdown'])app.action(actionId,async({body,action,ack})=>{
   const b=object(body),a=object(action),c=object(b.container);
