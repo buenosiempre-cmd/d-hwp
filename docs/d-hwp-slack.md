@@ -1,6 +1,6 @@
 # D-HWP Slack 설치·배포 안내
 
-D-HWP는 Slack의 HWP·HWPX 파일을 PDF, 앞 10쪽까지 PNG, 원문 텍스트 Markdown으로 변환하는 CoP 시제품입니다. RHWP 편집과 새 편집본 저장도 유지합니다. 설치 대상은 동국대 재무팀 Slack이며, **사용자 소유 앱의 자격 증명 설정과 실제 설치 검증은 아직 필요합니다.** 이 문서는 설치 준비 절차이며 운영 완료 기록이 아닙니다.
+D-HWP는 Slack의 HWP·HWPX 파일을 PDF, 앞 10쪽 PNG 갤러리, 원문 Markdown·TXT, 선택 쪽 PNG ZIP으로 변환하는 CoP 시제품입니다. RHWP 편집과 새 편집본 저장도 유지합니다. 설치 대상은 동국대 재무팀 Slack이며, **사용자 소유 앱의 자격 증명 설정과 실제 설치 검증은 아직 필요합니다.** 이 문서는 설치 준비 절차이며 운영 완료 기록이 아닙니다.
 
 ## 1. 별도 Slack 앱과 주소 준비
 
@@ -101,7 +101,7 @@ node --env-file=/absolute/private/d-hwp-slack.env --import tsx src/server/main.t
 - `.cache/conversion/` 전체: print·변환 child 번들, runtime manifest, 폰트
 - `scripts/slack-preflight.ts`, `scripts/check-slack-runtime.mjs`
 
-빌드를 마쳤다면 큰 `.cache/studio-source`, `.cache/studio.tar`, `tests`, `site`, `dist/desk`, 기존 사용자 `.env`와 상태 DB는 이 실행 사본에 필요하지 않습니다. Markdown 변환은 PDF 변환 child 번들에 포함되며 별도 엔진을 설치하지 않습니다.
+빌드를 마쳤다면 큰 `.cache/studio-source`, `.cache/studio.tar`, `tests`, `site`, `dist/desk`, 기존 사용자 `.env`와 상태 DB는 이 실행 사본에 필요하지 않습니다. Markdown·TXT·선택 쪽 이미지 변환은 PDF 변환 child 번들에 포함되며 별도 엔진을 설치하지 않습니다.
 
 Chromium과 Node는 기존의 **고정된 전용 설치 경로**를 참조해 중복 설치를 피할 수 있습니다. macOS/APFS에서 별도 릴리스 파일을 만들 때 copy-on-write clone을 사용할 수 있으나, 파일시스템 지원과 실제 추가 사용량을 확인해야 합니다. 개발 checkout을 가리키는 심볼릭 링크나 수정이 전파되는 hard link를 immutable 릴리스로 취급하지 않습니다. 실행 버전·원본 커밋·자산 해시를 기록하고 새 릴리스 단위로 교체합니다.
 
@@ -110,8 +110,8 @@ Chromium과 Node는 기존의 **고정된 전용 설치 경로**를 참조해 �
 ## 6. 실제 Slack 수용과 원복
 
 1. 사용할 채널에 새 D-HWP 앱을 초대하고 요청자도 참여합니다. 사전 채널 ID 등록 없이 활성화되는지 확인합니다.
-2. 합성 HWP·HWPX 파일로 PDF, 첫 3쪽·앞 10쪽 PNG, 원문 Markdown 파일을 같은 스레드에서 확인합니다.
-3. Markdown 안에 실제 원문이 들어 있으며 AI 요청문이 아님을 확인합니다. 그림·표·줄바꿈 한계도 원본과 비교합니다.
+2. 합성 HWP·HWPX 파일로 PDF, 첫 3쪽·앞 10쪽 PNG, 원문 Markdown·TXT, `1,3-5,12` 선택 쪽 PNG ZIP을 같은 스레드에서 확인합니다. 12쪽 이상인 합성 문서를 사용하세요.
+3. Markdown·TXT 안의 원문과 ZIP 내부 선택 쪽을 확인합니다. 그림·표·줄바꿈 한계도 원본과 비교하고, 없는 쪽·11개 이상 선택·만료된 선택 창이 거부되는지 확인합니다.
 4. RHWP 편집을 열고 새 편집본을 저장한 뒤 Slack 결과와 재열기를 확인합니다.
 5. 앱이 참여하지 않은 채널·권한 회수·삭제된 원본은 거절되는지 확인합니다. 원본 내용·토큰이 로그에 남지 않는지 확인합니다.
 6. 별도 프로세스를 재시작한 뒤 상태 복구와 같은 요청의 중복 업로드 방지를 확인합니다.
