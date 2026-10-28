@@ -26,7 +26,8 @@
     "test:slack": "node scripts/run-tests.mjs slack",
     "test:security": "node scripts/run-tests.mjs security",
     "check": "node scripts/check.mjs",
-    "preflight:slack": "node --env-file=.env --import tsx scripts/slack-preflight.ts"
+    "preflight:slack": "node --env-file=.env --import tsx scripts/slack-preflight.ts",
+    "test:corpus": "node scripts/verify-public-documents.mjs"
   },
   "dependencies": {
     "@google-cloud/firestore": "9.1.0",
