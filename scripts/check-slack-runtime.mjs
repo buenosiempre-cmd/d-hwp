@@ -79,13 +79,15 @@ await check('conversion_asset_integrity', async () => {
     requireValue(digest(await read(resolve('.cache/conversion/fonts', file))) === file.slice(0, -6));
   }
 });
-await check('markdown_conversion_present', async () => {
+await check('document_exports_present', async () => {
   const conversion = await import(pathToFileURL(resolve('src/conversion/convert.mjs')).href);
   requireValue(typeof conversion.convertMarkdown === 'function' && conversion.MAX_MARKDOWN_BYTES === 2 * 1024 * 1024);
-  // An older valid runtime manifest can still precede the Markdown feature.
-  // These stable engine/protocol names check that its child bundles include it.
+  requireValue(typeof conversion.convertText === 'function' && conversion.MAX_TEXT_BYTES === 2 * 1024 * 1024);
+  requireValue(typeof conversion.convertPageZip === 'function' && typeof conversion.convertSelectedPageImages === 'function' && conversion.MAX_ZIP_BYTES === 26 * 1024 * 1024);
+  // A valid manifest may still describe an older runtime without these modes.
   requireValue((await read('.cache/conversion/pdf-child.mjs')).includes('getTextFileUnicode'));
-  requireValue((await read('.cache/conversion/runtime-child.mjs')).includes('markdown'));
+  const runtime = await read('.cache/conversion/runtime-child.mjs');
+  requireValue(['markdown', 'text', 'selected'].every(mode => runtime.includes(mode)));
 });
 let freeMiB = null;
 try { const info = await statfs('.'); freeMiB = Math.floor(info.bavail * info.bsize / 1024 / 1024); } catch {}

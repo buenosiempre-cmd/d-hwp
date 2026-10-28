@@ -9,6 +9,8 @@ import {sharedChannels} from './file-sharing';
 import {HELP, parseCommand} from './commands';
 import {Replays} from './replays';
 import {Selections, candidatesFrom, selectionView} from './shortcuts';
+import {ExportSelections,exportView,parseExportView,type ExportSelection} from './export-options';
+import type {ExportRequest} from './document-exports';
 import {Documents} from './documents';
 import {Saves} from './saves';
 import {State} from './state';
@@ -28,7 +30,7 @@ function trigger(value:unknown):string {
   if (typeof value!=='string' || value.length<1 || value.length>256) throw new UserError('bad_trigger','요청 식별자가 올바르지 않습니다. 다시 요청하세요.');
   return value;
 }
-export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotIdentity,options:{sessionStore?:import('./cloud/metadata').MetadataStore;download?:typeof import('./download').downloadFile;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[0];convertImages?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[1];markdown?:typeof import('../conversion/convert.mjs').convertMarkdown}={}) {
+export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotIdentity,options:{sessionStore?:import('./cloud/metadata').MetadataStore;download?:typeof import('./download').downloadFile;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[0];convertImages?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[1];markdown?:typeof import('../conversion/convert.mjs').convertMarkdown;text?:typeof import('../conversion/convert.mjs').convertText;zip?:typeof import('../conversion/convert.mjs').convertPageZip}={}) {
   const state=config.statePath?new State(config.statePath,config.teamId):undefined;
   const settings=new Settings(config,api,state);config={...config,channelIds:settings.enabled};
   const reactions=new Reactions(api,config.reactions===true,state);
@@ -39,6 +41,7 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
     return {teamId:config.teamId,botToken:config.botToken,...botIdentity};
   }});
   const selections=new Selections(options.now);
+  const exportSelections=new ExportSelections(options.now);
   const replays=new Replays(options.now,state);
   const notice=async(actor:Actor,text:string)=>{await api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text});};
   const notify=async(job:Readonly<Job>)=>{
@@ -194,6 +197,39 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
       await ack();void settings.home(body.team?.id??'',body.user.id).catch(()=>{});
     }catch(error){await ack({response_action:'errors',errors:{channel:userMessage(error)}});}
   });
+  app.action('rhwp_export_options',async({body,action,ack})=>{
+    await ack();if(!documents)return;let who:Actor|undefined;
+    try{
+      const b=object(body),a=object(action),container=object(b.container);
+      who=actor(object(b.team).id,object(b.user).id,container.channel_id);
+      if(container.type!=='message'||typeof container.message_ts!=='string'||typeof a.value!=='string')denied();
+      if(b.channel&&object(b.channel).id!==who.channelId)denied();
+      const requestId=trigger(b.trigger_id),card=await documents.authorize(a.value,who);
+      if(card.messageTs!==container.message_ts)denied();
+      if(!replays.claim(`export-options:${who.teamId}:${who.userId}:${requestId}`))return;
+      const id=exportSelections.create(who,card.id,container.message_ts);
+      try{await api.call('views.open',{trigger_id:requestId,view:exportView(id,card.pageCount)});}
+      catch(error){exportSelections.delete(id);throw error;}
+    }catch(error){if(who)await notice(who,userMessage(error)).catch(()=>{});}
+  });
+  app.view('rhwp_export_document',async({body,view,ack})=>{
+    let selection:ExportSelection,request:ExportRequest;
+    try{
+      if(!documents)throw new UserError('export_unavailable','문서 변환 연결을 사용할 수 없습니다.');
+      selection=exportSelections.get(view.private_metadata,body.team?.id??'',body.user.id);
+      request=parseExportView(view.state.values);
+    }catch(error){
+      const field=error instanceof UserError&&error.code==='invalid_export_selection'?'format':view.state?.values?.format?.value?.selected_option?.value==='zip'?'pages':'format';
+      await ack({response_action:'errors',errors:{[field]:userMessage(error)}});return;
+    }
+    exportSelections.delete(view.private_metadata);await ack();
+    try{
+      const result=await documents!.exportFile(selection.cardId,selection.actor,selection.messageTs,request);
+      await documents!.authorize(selection.cardId,selection.actor);
+      const label=request.format==='txt'?'원문 TXT':'선택 쪽 PNG ZIP';
+      await notice(selection.actor,result.url?`${label}을 같은 스레드에 첨부했습니다. <${result.url}|${label} 열기>`:`${label}을 같은 스레드에 첨부했습니다.`);
+    }catch(error){await notice(selection.actor,userMessage(error)).catch(()=>{});}
+  });
   for(const actionId of ['rhwp_more_pages','rhwp_export_markdown'])app.action(actionId,async({body,action,ack})=>{
     await ack();if(!documents)return;let who:Actor|undefined;
     try{
@@ -246,8 +282,8 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
   });
   app.error(async()=>{}); // No raw payload/token logging; callers receive safe errors above.
   receiver.router.get('/healthz',(_req,res)=>{res.json({ok:true});});
-  const sweep=setInterval(()=>{preparations.sweep();selections.sweep();replays.sweep();documents?.sweep();saves?.sweep();reactions.sweep();},60_000);sweep.unref();
+  const sweep=setInterval(()=>{preparations.sweep();selections.sweep();exportSelections.sweep();replays.sweep();documents?.sweep();saves?.sweep();reactions.sweep();},60_000);sweep.unref();
   const reactionRecovery=reactions.recover(new Set([...preparations.activeIds(),...(documents?.pendingIds()??[])]));
   const ready=documents?.recover().catch(()=>{}).then(()=>preparations.start())??Promise.resolve().then(()=>preparations.start());
-  return {ready,state,settings,reactions,receiver,app,preparations,selections,documents,saves,async close(){clearInterval(sweep);await ready;await preparations.close();await saves?.close();await documents?.close();await reactionRecovery;await reactions.idle();state?.close();}};
+  return {ready,state,settings,reactions,receiver,app,preparations,selections,exportSelections,documents,saves,async close(){clearInterval(sweep);await ready;await preparations.close();await saves?.close();await documents?.close();await reactionRecovery;await reactions.idle();state?.close();}};
 }

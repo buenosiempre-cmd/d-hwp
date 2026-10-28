@@ -29,6 +29,7 @@ test('a verified invitation enables a new channel, welcomes once, and survives r
     const settings=new Settings(empty,api,state);assert.equal(settings.mode('CNEW'),'off');
     await settings.joined('CNEW','UBOT');assert.equal(settings.mode('CNEW'),'auto');assert.ok(settings.enabled.has('CNEW'));
     const welcome=api.calls.filter(c=>c.method==='chat.postMessage');assert.equal(welcome.length,1);assert.equal(welcome[0].args.channel,'CNEW');assert.match(JSON.stringify(welcome[0].args),/원문 Markdown/);
+    for(const text of ['형식·쪽 선택','TXT','PNG ZIP'])assert.ok(JSON.stringify(welcome[0].args).includes(text));
     assert.equal(api.calls.some(c=>c.method==='conversations.members'),false);
     await settings.joined('CNEW','UBOT');assert.equal(api.calls.filter(c=>c.method==='chat.postMessage').length,1);
     state.close();state=new State(path,'TTEST');const restored=new Settings(empty,api,state);assert.equal(restored.mode('CNEW'),'auto');assert.ok(restored.enabled.has('CNEW'));
@@ -82,6 +83,7 @@ test('settings slash command opens a modal outside enabled channels; non-admins 
     const request=await signed(server.origin,new URLSearchParams(command({text:'settings',channel_id:'CNEW'})));assert.equal(request.status,200);
     await until(()=>server.api.calls.some(c=>c.method==='views.open'));
     const view=server.api.calls.find(c=>c.method==='views.open')!.args.view as any;assert.equal(view.callback_id,'rhwp_channel_settings');assert.equal(view.blocks[1].element.initial_conversation,'CNEW');
+    assert.match(view.blocks[0].text.text,/형식·쪽 선택/);assert.match(view.blocks[0].text.text,/TXT/);assert.match(view.blocks[0].text.text,/PNG ZIP/);
     await signed(server.origin,new URLSearchParams(command({text:'settings',user_id:'UOTHER'})));assert.equal(server.api.calls.filter(c=>c.method==='views.open').length,1);
   }finally{await server.stop();}
 });

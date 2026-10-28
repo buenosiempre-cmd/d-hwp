@@ -19,15 +19,17 @@ function buttons(message:Record<string,unknown>):Button[]{return (message.blocks
 test('conversion card leads with PDF and original Markdown while retaining bounded PNG and optional editing',()=>{
   const source=card(),message=documentMessage(source,origin,'browser'),actions=buttons(message);
   assert.equal(message.metadata,undefined);
-  assert.deepEqual(actions.map(button=>button.action_id),['rhwp_view_pdf','rhwp_export_markdown','rhwp_more_pages','rhwp_browser_edit']);
+  assert.deepEqual(actions.map(button=>button.action_id),['rhwp_view_pdf','rhwp_export_markdown','rhwp_export_options','rhwp_more_pages','rhwp_browser_edit']);
   assert.equal(actions[0].url,source.pdfUrl);assert.equal(actions[0].text.text,'PDF 열기');
   assert.equal(actions[1].value,source.id);assert.equal(actions[1].url,undefined);
   assert.equal(actions[1].text.text,'원문 Markdown 만들기');
-  assert.equal(actions[2].text.text,'PNG 이미지 (앞 10쪽)');assert.equal(actions[2].value,source.id);
-  assert.equal(actions[3].text.text,'문서 편집 (RHWP)');
+  assert.equal(actions[2].text.text,'형식·쪽 선택');assert.equal(actions[2].value,source.id);assert.equal(actions[2].url,undefined);
+  assert.equal(actions[3].text.text,'PNG 이미지 (앞 10쪽)');assert.equal(actions[3].value,source.id);
+  assert.equal(actions[4].text.text,'문서 편집 (RHWP)');
   const section=(message.blocks as Block[]).find(block=>block.type==='section')!.text!.text;
   assert.ok(section.includes('&lt;@UTEST&gt; &amp; 업무보고.hwp'));assert.ok(!section.includes('<@UTEST>'));
   assert.match(JSON.stringify(message.blocks),/원문 텍스트 중심/);
+  assert.match(JSON.stringify(message.blocks),/TXT/);assert.match(JSON.stringify(message.blocks),/OCR/);
   const metadata=documentMetadata(source,origin) as {entity_payload:{attributes:{product_name:string}}};
   assert.equal(metadata.entity_payload.attributes.product_name,'D-HWP');
 });
@@ -50,7 +52,7 @@ test('D-HWP Home explains conversion for ordinary members without exposing admin
   await settings.home('TTEST','UOTHER');
   const home=api.calls.find(call=>call.method==='views.publish')!;
   const value=JSON.stringify(home.args);
-  for(const expected of ['D-HWP','PDF 열기','PNG 이미지 (앞 10쪽)','원문 Markdown 만들기','동국 한글문서 변환','/dhwp md','문서 편집 (RHWP)'])assert.ok(value.includes(expected),expected);
+  for(const expected of ['D-HWP','PDF 열기','PNG 이미지 (앞 10쪽)','원문 Markdown 만들기','형식·쪽 선택','TXT','PNG ZIP','최대 10쪽','동국 한글문서 변환','/dhwp md','문서 편집 (RHWP)'])assert.ok(value.includes(expected),expected);
   assert.ok(!value.includes('rhwp_settings'));assert.ok(!value.includes('CPRIVATE'));
   assert.match(value,/원문 텍스트 중심/);
 });
@@ -61,6 +63,9 @@ test('new Slack manifest uses the distinct dhwp command and conversion shortcut 
   assert.deepEqual(manifest.features.slash_commands.map((entry:{command:string})=>entry.command),['/dhwp']);
   assert.equal(manifest.features.shortcuts[0].name,'동국 한글문서 변환');
   assert.equal(manifest.features.shortcuts[0].callback_id,'rhwp_open_document');
+  for(const description of [manifest.display_information.description,manifest.features.slash_commands[0].description,manifest.features.shortcuts[0].description]){
+    assert.ok(description.length<=80);assert.match(description,/TXT/);assert.match(description,/ZIP/);
+  }
   assert.ok(manifest.oauth_config.scopes.bot.includes('files:write'));
   assert.ok(manifest.oauth_config.scopes.bot.every((scope:string)=>!scope.endsWith(':history')));
 });

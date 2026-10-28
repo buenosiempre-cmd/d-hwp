@@ -27,6 +27,7 @@ export function documentMessage(card:Card,origin:string,editorMode:'embed'|'brow
     const outputs:Record<string,unknown>[]=[];
     if(card.pdf==='ready'&&card.pdfUrl)outputs.push({type:'button',action_id:'rhwp_view_pdf',text:{type:'plain_text',text:'PDF 열기'},url:card.pdfUrl});
     outputs.push({type:'button',action_id:'rhwp_export_markdown',value:card.id,text:{type:'plain_text',text:card.markdownUrl?'원문 Markdown 다시 받기':'원문 Markdown 만들기'}});
+    outputs.push({type:'button',action_id:'rhwp_export_options',value:card.id,text:{type:'plain_text',text:'형식·쪽 선택'}});
     blocks.push({type:'actions',elements:outputs});
     if(card.recovery?.state==='running')blocks.push({type:'context',elements:[{type:'plain_text',text:card.recovery.attempt===0?'미리보기 요청을 접수했습니다. PDF·이미지를 준비할 차례를 기다리고 있습니다.':'PDF·이미지를 다시 준비하고 있습니다.'}]});
     if(card.recovery?.state==='retrying')blocks.push({type:'context',elements:[{type:'plain_text',text:`PDF·이미지 준비에 실패해 자동으로 다시 시도합니다. (${card.recovery.attempt}/${card.recovery.maxAttempts}회 시도)`}]});
@@ -46,7 +47,7 @@ export function documentMessage(card:Card,origin:string,editorMode:'embed'|'brow
       blocks.push({type:'actions',elements:[{type:'button',action_id:'rhwp_more_pages',value:card.id,text:{type:'plain_text',text:card.imageState==='failed'?'PNG 이미지 다시 준비':'PNG 이미지 (앞 10쪽)'}}]});
     }
     if(card.pageCount&&card.pageCount>10&&images.length===10)blocks.push({type:'context',elements:[{type:'plain_text',text:'앞 10페이지를 표시했습니다. 전체 문서는 PDF로 볼 수 있습니다.'}]});
-    blocks.push({type:'context',elements:[{type:'plain_text',text:'D-HWP · 변환 파일은 이 스레드에 공유됩니다. Markdown은 원문 텍스트 중심으로 변환하며 그림·쪽 배치와 일부 표 구조는 보존되지 않을 수 있습니다.'}]});
+    blocks.push({type:'context',elements:[{type:'plain_text',text:'D-HWP · 변환 파일은 이 스레드에 공유됩니다. 형식·쪽 선택에서 원문 TXT 또는 선택 쪽 PNG ZIP을 받을 수 있습니다. TXT·Markdown은 원문 텍스트 중심이며 OCR·그림·수식·표 배치 복원은 지원하지 않습니다.'}]});
     if(editorMode==='browser')blocks.push({type:'actions',elements:[{type:'button',action_id:'rhwp_browser_edit',text:{type:'plain_text',text:'문서 편집 (RHWP)'},url:browserEditorUrl(card,origin)}]});
     return {channel:card.actor.channelId,...(fileIds.length?{file_ids:fileIds}:{}),text:documentText(card)+' · '+detail,blocks,parse:'none',unfurl_links:false,unfurl_media:false,...(editorMode==='embed'?{metadata:{entities:[documentMetadata(card,origin)]}}:{})};
   }

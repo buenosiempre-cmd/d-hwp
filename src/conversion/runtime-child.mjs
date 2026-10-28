@@ -6,6 +6,7 @@ import {once} from 'node:events';
 import {finished} from 'node:stream/promises';
 import {resolve} from 'node:path';
 import {workerEnvironment} from './worker-env.mjs';
+import {normalizeSelectedPages} from './selection.mjs';
 let active=false,stopping=false;
 const send=value=>{if(process.connected)process.send(value);};
 const metric=(stage,phase,started)=>send({type:'metric',value:{stage,phase,...(started===undefined?{}:{durationMs:Math.round(performance.now()-started),rssBytes:process.memoryUsage().rss})}});
@@ -31,10 +32,11 @@ try{
   active=true;
   void (async()=>{
    const {mode,start,end,bytes}=request;
-   if(!Buffer.isBuffer(bytes)||bytes.length>20*1024*1024||!['pdf','preview','images','markdown'].includes(mode)||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>10)throw new Error('request');
+   if(!Buffer.isBuffer(bytes)||bytes.length>20*1024*1024||!['pdf','preview','images','selected','markdown','text'].includes(mode)||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>10)throw new Error('request');
+   const selectedPages=mode==='selected'?normalizeSelectedPages(request.selectedPages):undefined;
    const workerStart=performance.now();metric('process_start','start');
    // Each thread gets new JS bindings, WASM instance/memory and copied assets. No SharedArrayBuffer.
-   const worker=new Worker(resolve('.cache/conversion/pdf-child.mjs'),{execArgv:[],env:workerEnvironment(),stdout:true,stderr:true,resourceLimits:{maxOldGenerationSizeMb:512},workerData:{mode,start,end,bytes,module,fontManifest,fontBytes,print,browserWs}});
+   const worker=new Worker(resolve('.cache/conversion/pdf-child.mjs'),{execArgv:[],env:workerEnvironment(),stdout:true,stderr:true,resourceLimits:{maxOldGenerationSizeMb:512},workerData:{mode,start,end,selectedPages,bytes,module,fontManifest,fontBytes,print,browserWs}});
    worker.once('online',()=>metric('process_start','finish',workerStart));
    let failure;
    worker.on('message',value=>{if(value?.phase==='failed')failure=value;send({type:'metric',value});});worker.stderr.resume();

@@ -26,6 +26,8 @@ import {validateDocument} from '../validate-document';
 import {validateInput} from '../../shared/errors';
 import {convertPreview,convertPageImages,convertMarkdown,MAX_MARKDOWN_BYTES,type PageImage} from '../../conversion/convert.mjs';
 import type {Mode} from '../commands';
+import {normalizeExportRequest,exportKey,exportName,savedExports,MAX_DOCUMENT_EXPORTS,type ExportRequest} from '../document-exports';
+import {convertText,convertPageZip,MAX_TEXT_BYTES,MAX_ZIP_BYTES} from '../../conversion/convert.mjs';
 interface CloudCard extends Omit<Card,'imageAttempts'|'imageWork'|'updates'> {attempts?:Record<string,UploadAttempt>;fence?:string;removed?:boolean;previewRequestId?:string;pdfPreparedAt?:number;slackPublishedAt?:number;}
 interface Request {actor:Actor;fileId:string;mode?:Mode;}
 interface SaveOperation {hash:string;cardId:string;attempt:UploadAttempt;receipt:Receipt;}
@@ -33,7 +35,7 @@ const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex
 const stableId=(value:string)=>{const h=hash(value);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;};
 export class CloudApplication {
   readonly sessions:SharedSessions;
-  constructor(readonly config:Config,readonly api:SlackApi,readonly store:MetadataStore,readonly tasks:DurableTasks,private options:{download?:typeof downloadFile;convert?:typeof convertPreview;images?:typeof convertPageImages;markdown?:typeof convertMarkdown;fetcher?:typeof fetch;noticeIdentity?:{generation:string;botUserId:string;check:()=>Promise<void>}}={}){
+  constructor(readonly config:Config,readonly api:SlackApi,readonly store:MetadataStore,readonly tasks:DurableTasks,private options:{download?:typeof downloadFile;convert?:typeof convertPreview;images?:typeof convertPageImages;markdown?:typeof convertMarkdown;text?:typeof convertText;zip?:typeof convertPageZip;fetcher?:typeof fetch;noticeIdentity?:{generation:string;botUserId:string;check:()=>Promise<void>}}={}){
     this.sessions=new SharedSessions(store,async(id,actor)=>{await this.authorize(id,actor);});
   }
   async mode(channel:string):Promise<'auto'|'mention'|'off'>{
@@ -114,6 +116,53 @@ export class CloudApplication {
       return result;
     });
   }
+  async exportFile(id:string,actor:Actor,messageTs:string,value:ExportRequest,task?:TaskContext):Promise<{id:string;url?:string}>{
+    const request=normalizeExportRequest(value),key=exportKey(request);
+    await this.authorize(id,actor,task);
+    return this.locked(id,async(card,lease)=>{
+      const context:LeaseContext={...lease,signal:AbortSignal.any([lease.signal,...(task?[task.signal]:[])]),checkpoint:async()=>{await lease.checkpoint();await task?.checkpoint();}};
+      await context.checkpoint();await this.authorize(id,actor,context);
+      if(card.messageTs!==messageTs)denied();
+      if(request.format==='zip'&&card.pageCount&&request.pages.some(page=>page>card.pageCount!))throw new UserError('export_selection',`이 문서는 ${card.pageCount}쪽입니다. 문서 안의 쪽을 선택하세요.`);
+      card.exports??={};
+      let receipt=card.exports[key];
+      if(receipt&&exportKey(normalizeExportRequest(receipt.request))!==key)denied();
+      if(!receipt&&Object.keys(card.exports).length>=MAX_DOCUMENT_EXPORTS)throw new UserError('export_limit','이 문서의 내보내기는 서로 다른 형식·쪽 선택 20개까지 지원합니다. 기존 선택으로 다시 요청해 주세요.');
+      const source=await this.ensureSource(id,actor,context.signal),sourceHash=hash(source);
+      if(!card.contentHash){
+        // Migrated cards need a durable baseline before any export is generated.
+        // Never bind an older upload (including a different selection) to unknown bytes.
+        if(Object.values(card.exports).some(value=>value.fileId||value.attempt?.fileId))throw new UserError('source_changed','기존 내보내기의 원본을 확인할 수 없습니다. 원본 파일에서 문서를 다시 요청해 주세요.');
+        card.contentHash=sourceHash;await this.write(card,context);
+      }
+      if(receipt?.fileId&&receipt.attempt?.saved)return {id:receipt.fileId,url:receipt.url};
+      if(!receipt){receipt=card.exports[key]={request};await this.write(card,context);}
+      try{
+      let bytes:Buffer;
+      if(request.format==='txt'){
+        bytes=await (this.options.text??convertText)(source,{timeoutMs:120_000,signal:context.signal});
+        if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_TEXT_BYTES)throw new UserError('export_output','TXT 변환 결과를 확인할 수 없습니다.');
+        try{new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{throw new UserError('export_output','TXT 변환 결과를 확인할 수 없습니다.');}
+      }else{
+        const result=await (this.options.zip??convertPageZip)(source,{pages:request.pages,timeoutMs:120_000,signal:context.signal});
+        if(!Number.isSafeInteger(result.pageCount)||result.pageCount<1||result.pageCount>200||(card.pageCount!==undefined&&card.pageCount!==result.pageCount)||!Array.isArray(result.pages)||result.pages.length!==request.pages.length||result.pages.some((page,index)=>page!==request.pages[index]||page>result.pageCount)||!Buffer.isBuffer(result.zip)||result.zip.length<22||result.zip.length>MAX_ZIP_BYTES||result.zip.readUInt32LE(0)!==0x04034b50)throw new UserError('export_output','선택한 쪽의 ZIP 변환 결과를 확인할 수 없습니다.');
+        bytes=result.zip;
+      }
+      // A permission or same-size source change during conversion must prevent publication.
+      if(hash(await this.ensureSource(id,actor,context.signal))!==sourceHash)throw new UserError('source_changed','원본 내용이 변경되었습니다. 다시 요청하세요.');
+      await context.checkpoint();
+      const destination={...actor,threadTs:card.actor.threadTs??card.messageTs};
+      const result=await this.uploads(card,context).share(receipt.attempt??={},bytes,exportName(card.name,request),destination,async()=>{await this.authorize(id,actor,context);});
+      receipt.fileId=result.id;receipt.url=result.url;await this.write(card,context);
+      return result;
+      }catch(error){
+        // Invalid/out-of-range requests must not consume the finite receipt slots.
+        // An allocated or uncertain upload must survive for reconciliation.
+        if(!receipt.attempt?.fileId&&!receipt.attempt?.completing){delete card.exports[key];try{await this.write(card,context);}catch{/* Preserve the original failure. */}}
+        throw error;
+      }
+    });
+  }
   private async schedulePreview(id:string,actor:Actor,messageTs:string,kind:'preview'|'images',requestId?:string):Promise<void>{
     await this.authorize(id,actor);
     const taskId=await this.locked(id,async(card,context)=>{
@@ -155,7 +204,7 @@ export class CloudApplication {
     await context.checkpoint();
     await this.store.atomic<CloudCard,void>('cards',card.id,current=>{
       if(!current||current.removed||current.fence!==context.owner)throw new Error('Card ownership changed');
-      const persisted={...card,markdownAttempt:card.markdownAttempt?savedAttempt(card.markdownAttempt):undefined,pdfAttempt:card.pdfAttempt?savedAttempt(card.pdfAttempt):undefined,attempts:card.attempts?Object.fromEntries(Object.entries(card.attempts).map(([key,value])=>[key,savedAttempt(value)])):undefined};
+      const persisted={...card,exports:savedExports(card.exports),markdownAttempt:card.markdownAttempt?savedAttempt(card.markdownAttempt):undefined,pdfAttempt:card.pdfAttempt?savedAttempt(card.pdfAttempt):undefined,attempts:card.attempts?Object.fromEntries(Object.entries(card.attempts).map(([key,value])=>[key,savedAttempt(value)])):undefined};
       return {value:{...persisted,sequence:Math.max(card.sequence??0,current.sequence??0),fence:context.owner},result:undefined};
     });
   }
