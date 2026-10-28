@@ -4,6 +4,7 @@ import { chromium } from '@playwright/test';
 import {workerData,parentPort} from 'node:worker_threads';
 import {once} from 'node:events';
 import {ConversionFailure} from './failures.mjs';
+import {markdownFromUnicode} from './markdown.mjs';
 import { resolve } from 'node:path';
 import {routeFont} from './font-routes.mjs';
 import { validateInput, MAX_PAGES } from '../shared/errors.ts';
@@ -20,7 +21,7 @@ async function frame(info,bytes){
   await output(length);await output(json);if(bytes)await output(bytes);
 }
 const {mode,start,end,module,fontManifest,fontBytes,print,browserWs}=workerData;
-if(!['pdf','preview','images'].includes(mode)||(mode!=='pdf'&&(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<1||end<start||end>10)))throw new Error('range');
+if(!['pdf','preview','images','markdown'].includes(mode)||(['preview','images'].includes(mode)&&(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<1||end<start||end>10)))throw new Error('range');
 try {
   const bytes=workerData.bytes;validateInput(bytes);
   begin('wasm_init');
@@ -28,6 +29,13 @@ try {
   begin('parse');
   doc=new HwpDocument(bytes);
   const count=doc.pageCount();pageCount=count;if(count<1||count>MAX_PAGES)throw new ConversionFailure('page_count');
+  if(mode==='markdown') {
+    begin('markdown');
+    const markdown=markdownFromUnicode(doc.getTextFileUnicode());
+    begin('output');
+    await frame({type:'document',pageCount:count});
+    await frame({type:'markdown',bytes:markdown.length},markdown);
+  } else {
   begin('svg_render');
   const pages=[];
   for(let i=0;i<(mode==='images'?Math.min(end,count):count);i++) {
@@ -92,6 +100,7 @@ try {
     }
     begin('output');
     // The supervisor sends end after this thread has exited.
+  }
   }
   metric('finish');
 } catch(error) { failureReason=error instanceof ConversionFailure?error.reason:operation??'conversion_error';metric('failed');process.exitCode=1; }

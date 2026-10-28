@@ -10,15 +10,18 @@ test('actual Bolt rejects tampered, stale and unsigned bodies before API access'
     assert.equal(server.api.calls.length,0);
   }finally{await server.stop();}
 });
-test('foreign team, application and unapproved channel cannot start document preparation',async()=>{
+test('foreign team/application make no API calls; an unjoined channel cannot start preparation',async()=>{
   const server=await start();try{
-    const changes:Record<string,string>[]=[{team_id:'TOTHER'},{api_app_id:'AOTHER'},{channel_id:'COTHER'}];
+    const changes:Record<string,string>[]=[{team_id:'TOTHER'},{api_app_id:'AOTHER'}];
     for(const change of changes){
       const before=performance.now();
       await signed(server.origin,new URLSearchParams(command(change)));
       assert.ok(performance.now()-before<2500);
     }
     assert.equal(server.api.calls.length,0);
+    await signed(server.origin,new URLSearchParams(command({channel_id:'COTHER'})));
+    assert.deepEqual(server.api.calls.map(c=>c.method),['conversations.info']);
+    assert.equal(server.settings.enabled.has('COTHER'),false);
   }finally{await server.stop();}
 });
 test('signed file-unshared event invalidates retained bytes and replay cannot invalidate a later request',async()=>{

@@ -5,8 +5,8 @@ import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {workerEnvironment} from './worker-env.mjs';
 import {readFrames,OutputError} from './frames.mjs';
-export {MAX_PDF_BYTES,MAX_PNG_BYTES,MAX_PNG_TOTAL_BYTES,MAX_PREVIEW_PAGES} from './frames.mjs';
-const METRIC_STAGES=new Set(['wasm_compile','runtime_reuse','browser_start','process_start','input','wasm_init','parse','svg_render','fonts_prepare','browser_render','dom_prepare','page_attach','fonts_ready','pdf','png','output']);
+export {MAX_PDF_BYTES,MAX_PNG_BYTES,MAX_PNG_TOTAL_BYTES,MAX_PREVIEW_PAGES,MAX_MARKDOWN_BYTES} from './frames.mjs';
+const METRIC_STAGES=new Set(['wasm_compile','runtime_reuse','browser_start','process_start','input','wasm_init','parse','markdown','svg_render','fonts_prepare','browser_render','dom_prepare','page_attach','fonts_ready','pdf','png','output']);
 export class ConversionError extends Error {constructor(code,message,stage){super(message);this.code=code;this.stage=stage;}}
 export function validMetric(value){
   if(!value||!METRIC_STAGES.has(value.stage)||!['start','finish','failed'].includes(value.phase))return;
@@ -22,6 +22,7 @@ export function validMetric(value){
   return {...details,stage:value.stage,phase:value.phase,...(value.durationMs!==undefined?{durationMs:value.durationMs}:{}),...(value.rssBytes!==undefined?{rssBytes:value.rssBytes}:{})};
 }
 export function convertPdf(bytes,options={}){return convert(bytes,options,'pdf',0,0);}
+export function convertMarkdown(bytes,options={}){return convert(bytes,options,'markdown',0,0);}
 export function convertPreview(bytes,options={}){return convert(bytes,options,'preview',1,3);}
 export function convertPageImages(bytes,{start=1,end=10,...options}={}){
   if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<1||end<start||end>10)return Promise.reject(new Error('미리보기 페이지 범위가 올바르지 않습니다.'));

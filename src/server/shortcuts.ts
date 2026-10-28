@@ -30,13 +30,13 @@ export function candidatesFrom(value:unknown):Candidate[] {
     }
   }
   if (!result.size) throw new UserError('no_files','이 메시지에 지원되는 HWP/HWPX 파일이 없습니다.');
-  if (result.size>100) throw new UserError('too_many_files','파일이 너무 많습니다. /rhwp open에 파일 링크 하나를 입력하세요.');
+  if (result.size>100) throw new UserError('too_many_files','파일이 너무 많습니다. /dhwp open에 파일 링크 하나를 입력하세요.');
   return [...result.values()];
 }
 export function selectionView(id:string,candidates:Candidate[]) {
   return {type:'modal',callback_id:'rhwp_select_document',private_metadata:id,
-    title:{type:'plain_text',text:'한글 문서 열기'},submit:{type:'plain_text',text:'문서 열기'},close:{type:'plain_text',text:'취소'},
-    blocks:[{type:'input',block_id:'document',label:{type:'plain_text',text:'편집할 문서'},element:{type:'static_select',action_id:'file',
+    title:{type:'plain_text',text:'동국 한글문서 변환'},submit:{type:'plain_text',text:'변환 준비'},close:{type:'plain_text',text:'취소'},
+    blocks:[{type:'input',block_id:'document',label:{type:'plain_text',text:'변환할 한글 문서'},element:{type:'static_select',action_id:'file',
       options:candidates.map(file=>({text:{type:'plain_text',text:file.name},value:file.id})),
     }}],
   };

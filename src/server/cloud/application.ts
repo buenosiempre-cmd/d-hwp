@@ -24,15 +24,16 @@ import {UserError,denied} from '../errors';
 import {slackDiagnostics,isSlackFailure} from '../slack-diagnostics';
 import {validateDocument} from '../validate-document';
 import {validateInput} from '../../shared/errors';
-import {convertPreview,convertPageImages,type PageImage} from '../../conversion/convert.mjs';
+import {convertPreview,convertPageImages,convertMarkdown,MAX_MARKDOWN_BYTES,type PageImage} from '../../conversion/convert.mjs';
+import type {Mode} from '../commands';
 interface CloudCard extends Omit<Card,'imageAttempts'|'imageWork'|'updates'> {attempts?:Record<string,UploadAttempt>;fence?:string;removed?:boolean;previewRequestId?:string;pdfPreparedAt?:number;slackPublishedAt?:number;}
-interface Request {actor:Actor;fileId:string;}
+interface Request {actor:Actor;fileId:string;mode?:Mode;}
 interface SaveOperation {hash:string;cardId:string;attempt:UploadAttempt;receipt:Receipt;}
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const stableId=(value:string)=>{const h=hash(value);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;};
 export class CloudApplication {
   readonly sessions:SharedSessions;
-  constructor(readonly config:Config,readonly api:SlackApi,readonly store:MetadataStore,readonly tasks:DurableTasks,private options:{download?:typeof downloadFile;convert?:typeof convertPreview;images?:typeof convertPageImages;fetcher?:typeof fetch;noticeIdentity?:{generation:string;botUserId:string;check:()=>Promise<void>}}={}){
+  constructor(readonly config:Config,readonly api:SlackApi,readonly store:MetadataStore,readonly tasks:DurableTasks,private options:{download?:typeof downloadFile;convert?:typeof convertPreview;images?:typeof convertPageImages;markdown?:typeof convertMarkdown;fetcher?:typeof fetch;noticeIdentity?:{generation:string;botUserId:string;check:()=>Promise<void>}}={}){
     this.sessions=new SharedSessions(store,async(id,actor)=>{await this.authorize(id,actor);});
   }
   async mode(channel:string):Promise<'auto'|'mention'|'off'>{
@@ -74,7 +75,7 @@ export class CloudApplication {
     const card=await this.store.get<CloudCard>('cards',id);
     return !!card&&!card.removed&&typeof url==='string'&&[this.config.publicOrigin,card.origin].some(origin=>!!origin&&url===`${origin}/documents/${id}`);
   }
-  async submit(actor:Actor,fileId:string,key:string):Promise<string>{
+  async submit(actor:Actor,fileId:string,key:string,mode:Mode='open'):Promise<string>{
     await this.accessConfig(actor);if(!ID.file.test(fileId))denied();
     // Preserve request identities imported from the single-server deployment.
     if(key.startsWith('thread:')){
@@ -83,8 +84,8 @@ export class CloudApplication {
     }
     const id=stableId(JSON.stringify([actor.teamId,actor.channelId,key]));
     await this.store.atomic<Request,void>('preparations',id,current=>{
-      if(current&&(current.fileId!==fileId||current.actor.teamId!==actor.teamId||current.actor.channelId!==actor.channelId))throw new Error('Request conflict');
-      return {value:current??{actor,fileId},result:undefined};
+      if(current&&(current.fileId!==fileId||current.actor.teamId!==actor.teamId||current.actor.channelId!==actor.channelId||(current.mode??'open')!==mode))throw new Error('Request conflict');
+      return {value:current??{actor,fileId,mode},result:undefined};
     });
     if(!await this.store.get('cards',id))await this.reaction(id,actor,'pending',false);
     await this.tasks.enqueue('prepare:'+id,{teamId:actor.teamId,cardId:id,kind:'prepare'});return id;
@@ -94,6 +95,24 @@ export class CloudApplication {
   }
   async morePages(id:string,actor:Actor,messageTs:string,requestId?:string):Promise<void>{
     return this.schedulePreview(id,actor,messageTs,'images',requestId);
+  }
+  async exportMarkdown(id:string,actor:Actor,messageTs:string,task?:TaskContext):Promise<{id:string;url?:string}>{
+    await this.authorize(id,actor,task);
+    return this.locked(id,async(card,lease)=>{
+      const context:LeaseContext={...lease,signal:AbortSignal.any([lease.signal,...(task?[task.signal]:[])]),checkpoint:async()=>{await lease.checkpoint();await task?.checkpoint();}};
+      await context.checkpoint();await this.authorize(id,actor,context);
+      if(card.messageTs!==messageTs)denied();
+      if(card.markdownFileId&&card.markdownAttempt?.saved)return {id:card.markdownFileId,url:card.markdownUrl};
+      const source=await this.ensureSource(id,actor,context.signal);
+      const bytes=await (this.options.markdown??convertMarkdown)(source,{timeoutMs:120_000,signal:context.signal});
+      if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_MARKDOWN_BYTES)throw new UserError('markdown_output','Markdown 변환 결과를 확인할 수 없습니다.');
+      await this.authorize(id,actor,context);
+      const destination={...actor,threadTs:card.actor.threadTs??card.messageTs};
+      const result=await this.uploads(card,context).share(card.markdownAttempt??={},bytes,card.name.replace(/\.(hwp|hwpx)$/i,'').slice(0,170)+'.md',destination,async()=>{await this.authorize(id,actor,context);});
+      card.markdownFileId=result.id;card.markdownUrl=result.url;await this.write(card,context);
+      try{await this.update(card,actor,context);}catch{/* The confirmed file receipt remains authoritative. */}
+      return result;
+    });
   }
   private async schedulePreview(id:string,actor:Actor,messageTs:string,kind:'preview'|'images',requestId?:string):Promise<void>{
     await this.authorize(id,actor);
@@ -136,7 +155,7 @@ export class CloudApplication {
     await context.checkpoint();
     await this.store.atomic<CloudCard,void>('cards',card.id,current=>{
       if(!current||current.removed||current.fence!==context.owner)throw new Error('Card ownership changed');
-      const persisted={...card,pdfAttempt:card.pdfAttempt?savedAttempt(card.pdfAttempt):undefined,attempts:card.attempts?Object.fromEntries(Object.entries(card.attempts).map(([key,value])=>[key,savedAttempt(value)])):undefined};
+      const persisted={...card,markdownAttempt:card.markdownAttempt?savedAttempt(card.markdownAttempt):undefined,pdfAttempt:card.pdfAttempt?savedAttempt(card.pdfAttempt):undefined,attempts:card.attempts?Object.fromEntries(Object.entries(card.attempts).map(([key,value])=>[key,savedAttempt(value)])):undefined};
       return {value:{...persisted,sequence:Math.max(card.sequence??0,current.sequence??0),fence:context.owner},result:undefined};
     });
   }
@@ -285,9 +304,16 @@ export class CloudApplication {
       await this.reaction(spec.cardId,request.actor,'pending',true);
       await task.checkpoint();const bytes=await measured('download',()=>(this.options.download??downloadFile)(source,request.actor,this.config.botToken,task.signal));
       const fresh=await authorizeFile(this.api,config,request.actor,request.fileId,task.signal);if(fresh.name!==source.name||fresh.size!==source.size||fresh.downloadUrl!==source.downloadUrl)denied();
-      await this.store.atomic<CloudCard,void>('cards',spec.cardId,current=>({value:current??{id:spec.cardId,actor:{...request.actor},fileId:source.id,rootFileId:source.id,name:source.name,size:source.size,contentHash:hash(bytes),origin:this.config.publicOrigin,createdAt:Date.now(),revision:0,parentTs:request.actor.threadTs,pdf:'pending',imageState:'pending'},result:undefined}));
+      await this.store.atomic<CloudCard,void>('cards',spec.cardId,current=>({value:current??{requestedMode:request.mode,id:spec.cardId,actor:{...request.actor},fileId:source.id,rootFileId:source.id,name:source.name,size:source.size,contentHash:hash(bytes),origin:this.config.publicOrigin,createdAt:Date.now(),revision:0,parentTs:request.actor.threadTs,pdf:'pending',imageState:'pending'},result:undefined}));
       await this.locked(spec.cardId,async(card,context)=>{await task.checkpoint();await this.post(card,context);});
-      await this.tasks.enqueue('preview:'+spec.cardId,{teamId:spec.teamId,cardId:spec.cardId,kind:'preview'});return;
+      await this.tasks.enqueue('preview:'+spec.cardId,{teamId:spec.teamId,cardId:spec.cardId,kind:'preview'});
+      if(request.mode==='markdown'){
+        const card=await this.authorize(spec.cardId,request.actor,task);
+        const inputId=hash('markdown-command:'+spec.cardId);
+        await this.store.atomic('inputs',inputId,current=>({value:current??{kind:'export_markdown',actor:request.actor,cardId:card.id,messageTs:card.messageTs,terminalNoticeRequested:true},expiresAt:Date.now()+7*86400_000,result:undefined}));
+        await this.tasks.enqueue('event:'+inputId,{teamId:spec.teamId,cardId:inputId,kind:'event',terminalNoticeRequested:true});
+      }
+      return;
     }
     await this.locked(spec.cardId,async(card,lease)=>{
       const context:LeaseContext={...lease,signal:AbortSignal.any([task.signal,lease.signal]),checkpoint:async()=>{await task.checkpoint();await lease.checkpoint();}};
@@ -363,6 +389,10 @@ export class CloudApplication {
       for(const page of card.images??[])if(!page.shared){await this.confirm(card,page.fileId,actor,context);page.shared=true;}
       card.imageState='ready';card.recovery=undefined;await this.update(card,actor,context);milestone('all_ready');await this.reaction(card.id,card.actor,'ready',true);
     });
+    if(spec.kind==='preview'){
+      const card=await this.store.get<CloudCard>('cards',spec.cardId);
+      if(card?.requestedMode==='png'&&card.pdf==='ready'&&card.pageCount&&card.pageCount>3)await this.tasks.enqueue('png-command:'+card.id,{teamId:spec.teamId,cardId:card.id,kind:'images',actor:spec.actor??card.actor});
+    }
   }
   private async reaction(id:string,actor:Actor,state:'pending'|'ready'|'failed',validated:boolean):Promise<void>{
     if(!this.config.reactions||!actor.reactionTs)return;

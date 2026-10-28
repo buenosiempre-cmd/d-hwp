@@ -1,29 +1,29 @@
 {
   "display_information": {
-    "name": "rhwp",
-    "description": "Slack의 HWP/HWPX 문서를 열고 PDF로 보기",
-    "background_color": "#243447"
+    "name": "D-HWP 동국 한글문서 도우미",
+    "description": "Slack에서 한글 문서를 PDF·PNG·원문 Markdown으로 변환하는 동국대학교 CoP 시제품",
+    "background_color": "#b85022"
   },
   "features": {
     "bot_user": {
-      "display_name": "rhwp",
+      "display_name": "D-HWP",
       "always_online": false
     },
     "slash_commands": [
       {
-        "command": "/rhwp",
+        "command": "/dhwp",
         "url": "https://example.invalid/slack/events",
-        "description": "rhwp 채널의 자동 변환 설정을 엽니다",
-        "usage_hint": "채널 설정 열기",
+        "description": "한글 문서를 PDF·앞 10쪽 PNG·원문 Markdown으로 변환합니다",
+        "usage_hint": "pdf|png|md <Slack 파일 링크> 또는 help",
         "should_escape": true
       }
     ],
     "shortcuts": [
       {
-        "name": "한글 문서 열기",
+        "name": "동국 한글문서 변환",
         "type": "message",
         "callback_id": "rhwp_open_document",
-        "description": "메시지의 HWP/HWPX 문서 선택"
+        "description": "메시지의 HWP/HWPX를 PDF·PNG·원문 Markdown으로 변환"
       }
     ],
     "app_home": {

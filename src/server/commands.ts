@@ -1,17 +1,20 @@
 import {ID} from './config';
 import {UserError} from './errors';
-export type Mode = 'open' | 'pdf';
+export type Mode = 'open' | 'pdf' | 'png' | 'markdown';
 export type Command = {kind:'help'} | {kind:'prepare'; mode:Mode; fileId:string};
 export const HELP = [
-  '/rhwp — 채널 설정 열기',
-  '/rhwp open <Slack 파일 링크> — Studio에서 편집할 문서 준비',
-  '/rhwp edit <Slack 파일 링크> — 문서 열기와 동일',
-  '/rhwp pdf <Slack 파일 링크> — PDF로 볼 문서 준비',
-  '/rhwp help — 사용법',
-  '/rhwp settings — 관리자용 채널 설정',
-  '응답의 rhwp에서 편집으로 문서를 편집할 수 있습니다. PDF로 보기는 Slack에 공유한 PDF로 연결합니다. 편집본은 새 파일로 저장합니다.',
-  '채널 설정에 따라 HWP/HWPX 업로드 또는 @rhwp 멘션으로 스레드 미리보기를 만듭니다. 처음 3페이지를 보여주며 추가 페이지 보기로 앞 10페이지까지 펼칩니다.',
-  '이미지 단독·전체/지정 PNG·ZIP 명령은 추후 제공됩니다.',
+  'D-HWP · 동국 한글문서 도우미',
+  'HWP/HWPX 파일을 채널에 올린 뒤, 같은 스레드의 PDF·PNG·원문 Markdown 버튼을 선택하세요.',
+  '기존 파일은 메시지 메뉴의 동국 한글문서 변환으로 요청할 수 있습니다.',
+  '/dhwp pdf <Slack 파일 링크> — PDF로 변환',
+  '/dhwp png <Slack 파일 링크> — 앞 10쪽까지 PNG 이미지로 변환',
+  '/dhwp md <Slack 파일 링크> — 원문 내용을 Markdown(.md)으로 변환 (markdown도 사용 가능)',
+  '/dhwp open <Slack 파일 링크> — 변환 카드 준비와 문서 편집 (edit도 사용 가능)',
+  '/dhwp 또는 /dhwp help — 사용법',
+  '/dhwp settings — 관리자용 채널 설정',
+  '자동 변환 채널에서는 PDF와 첫 3쪽 PNG를 준비합니다. PNG 버튼으로 앞 10쪽까지 확인하고, 원문 Markdown은 버튼을 눌러 만듭니다. 멘션 모드에서는 파일이 있는 스레드에서 D-HWP를 멘션하세요.',
+  '변환 결과는 원본 메시지의 스레드에 공유합니다. Markdown은 원문의 텍스트를 옮긴 파일로, 그림·쪽 배치와 일부 표 구조는 보존되지 않을 수 있습니다.',
+  '수정이 필요하면 문서 편집 (RHWP)을 선택하세요. 편집본은 새 파일로 저장합니다.',
 ].join('\n');
 export function parseFileLink(raw: string, workspaceHost: string): string {
   let value=raw.trim();
@@ -22,7 +25,7 @@ export function parseFileLink(raw: string, workspaceHost: string): string {
   }
   if (/[\s\\]/.test(value)) throw new UserError('invalid_link','지원되지 않는 Slack 파일 링크입니다.');
   let url: URL;
-  try {url=new URL(value);} catch {throw new UserError('invalid_link','Slack 파일 URL을 입력하세요. 붙여넣기 후 파일명으로 바뀌면 한 번 실행 취소해 URL로 되돌리거나 메시지 메뉴의 한글 문서 열기를 사용하세요.');}
+  try {url=new URL(value);} catch {throw new UserError('invalid_link','Slack 파일 URL을 입력하세요. 붙여넣기 후 파일명으로 바뀌면 한 번 실행 취소해 URL로 되돌리거나 메시지 메뉴의 동국 한글문서 변환을 사용하세요.');}
   if (!value.startsWith(`https://${workspaceHost}/files/`)) throw new UserError('invalid_link','현재 워크스페이스의 Slack 파일 링크를 입력하세요.');
   const rawPath=value.slice(`https://${workspaceHost}`.length);
   const match=/^\/files\/([UW][A-Z0-9]+)\/(F[A-Z0-9]+)(?:\/[^/]+)?\/?$/.exec(rawPath);
@@ -42,7 +45,8 @@ export function parseCommand(text: string, host: string): Command {
   const value=text.trim();
   if (!value || value==='help') return {kind:'help'};
   const match=/^(\S+)(?:\s+([\s\S]+))?$/.exec(value)!;
-  if (['thumbnail','png'].includes(match[1])) throw new UserError('not_supported','첫 페이지 이미지와 PNG·ZIP 변환은 아직 제공되지 않습니다.');
-  if (!['open','edit','pdf'].includes(match[1]) || !match[2]) throw new UserError('invalid_command','/rhwp open <Slack 파일 링크> 또는 /rhwp help를 사용하세요.');
-  return {kind:'prepare',mode:match[1]==='pdf'?'pdf':'open',fileId:parseFileLink(match[2],host)};
+  if (['thumbnail','zip'].includes(match[1])) throw new UserError('not_supported','이미지는 /dhwp png <Slack 파일 링크>로 앞 10쪽까지 받을 수 있습니다. 개별 페이지 지정과 ZIP은 지원하지 않습니다.');
+  if (!['open','edit','pdf','png','md','markdown'].includes(match[1]) || !match[2]) throw new UserError('invalid_command','/dhwp pdf <Slack 파일 링크>, /dhwp png <Slack 파일 링크>, /dhwp md <Slack 파일 링크> 또는 /dhwp help를 사용하세요.');
+  const mode:Mode=match[1]==='pdf'?'pdf':match[1]==='png'?'png':['md','markdown'].includes(match[1])?'markdown':'open';
+  return {kind:'prepare',mode,fileId:parseFileLink(match[2],host)};
 }

@@ -2,6 +2,8 @@
 export const diagnosticSources=[
   'dist/cloud/distributed.cjs',
   'dist/cloud/main.cjs',
+  'src/conversion/convert.mjs',
+  'src/conversion/markdown.mjs',
   'src/server/access.ts',
   'src/server/cloud/application.ts',
   'src/server/cloud/channel-onboarding.ts',

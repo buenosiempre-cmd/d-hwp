@@ -11,8 +11,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (!value || !pattern.test(value)) throw new Error(`${key} 설정을 확인하세요.`);
     return value;
   };
-  const channels = required('SLACK_CHANNEL_IDS', /^[A-Z0-9,\s]+$/).split(',').map(s=>s.trim());
-  if (!channels.length || channels.some(id=>!ID.channel.test(id))) throw new Error('SLACK_CHANNEL_IDS 설정을 확인하세요.');
+  // A new app starts with no active channels; signed invite events enable them.
+  const channels = (env.SLACK_CHANNEL_IDS??'').split(',').map(s=>s.trim()).filter(Boolean);
+  if (channels.some(id=>!ID.channel.test(id))) throw new Error('SLACK_CHANNEL_IDS 설정을 확인하세요.');
   const port = Number(env.PORT || 3000);
   if (!Number.isInteger(port) || port<1 || port>65535) throw new Error('PORT 설정을 확인하세요.');
   const host=env.HOST??'127.0.0.1';
