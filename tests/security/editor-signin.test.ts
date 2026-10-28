@@ -40,7 +40,7 @@ test('valid Slack login without document membership is denied; cancellation issu
 });
 test('external beta message has authenticated browser action without embed metadata; internal default is preserved',()=>{
   const card={id:cardId,name:'문서.hwp',actor:{teamId:'TTEST',channelId:'CTEST',userId:'UTEST'},pdf:'pending',fileId:'FTEST'} as any;
-  const beta=documentMessage(card,'https://api.example.com','browser');assert.equal(beta.metadata,undefined);const actions=(beta.blocks as any[]).flatMap(b=>b.type==='actions'?b.elements:[]),button=actions.find(a=>a.action_id==='rhwp_browser_edit');assert.equal(button.text.text,'rhwp에서 편집');assert.ok(button.url.includes('/browser/open?workspace=TTEST&document='));assert.equal(button.url.includes('ticket'),false);
+  const beta=documentMessage(card,'https://api.example.com','browser');assert.equal(beta.metadata,undefined);const actions=(beta.blocks as any[]).flatMap(b=>b.type==='actions'?b.elements:[]),button=actions.find(a=>a.action_id==='rhwp_browser_edit');assert.equal(button.text.text,'문서 편집 (RHWP)');assert.ok(button.url.includes('/browser/open?workspace=TTEST&document='));assert.equal(button.url.includes('ticket'),false);
   assert.ok(documentMessage(card,'https://api.example.com').metadata);
 });
 

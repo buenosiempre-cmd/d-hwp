@@ -20,7 +20,7 @@ test('real Bolt acknowledges before a slow download and deduplicates repeated sl
 });
 test('help and malformed commands acknowledge without document API or response_url calls',async()=>{
   const server=await start();try{
-    const help=await signed(server.origin,new URLSearchParams(command({text:'help'})));assert.equal(help.status,200);assert.match(await help.text(),/rhwp pdf/);
+    const help=await signed(server.origin,new URLSearchParams(command({text:'help'})));assert.equal(help.status,200);assert.match(await help.text(),/dhwp pdf/);
     const bad=await signed(server.origin,new URLSearchParams(command({text:'open https://attacker.invalid/a.hwp'})));assert.equal(bad.status,200);assert.match(await bad.text(),/워크스페이스/);
     assert.equal(server.api.calls.length,0);
   }finally{await server.stop();}

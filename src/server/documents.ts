@@ -10,6 +10,7 @@ import {SharedSessions} from './cloud/sessions';
 import type {MetadataStore} from './cloud/metadata';
 import {Uploads,savedAttempt,type UploadAttempt} from './uploads';
 import type {PageImages,PageImage} from '../conversion/convert.mjs';
+import {convertMarkdown,MAX_MARKDOWN_BYTES} from '../conversion/convert.mjs';
 import {PdfJobs} from './pdf-jobs';
 import type {State} from './state';
 import {denied,UserError} from './errors';
@@ -20,13 +21,16 @@ export interface Card {
   revision:number;sequence?:number;parentId?:string;parentTs?:string;messageTs?:string;posting?:boolean;
   recovery?:{taskId:string;state:'running'|'retrying'|'failed';attempt:number;maxAttempts:number;errorCode?:string};
   pdf:'pending'|'ready'|'failed';pdfUrl?:string;pdfFileId?:string;
+  requestedMode?:import('./commands').Mode;
+  markdownAttempt?:UploadAttempt;markdownFileId?:string;markdownUrl?:string;
   pageCount?:number;images?:{page:number;fileId:string;shared?:boolean}[];imageTarget?:number;imageState?:'pending'|'ready'|'failed';
   imageAttempts?:Map<number,UploadAttempt>;pdfAttempt?:UploadAttempt;imageWork?:Promise<void>;updates?:Promise<void>;
 }
 export class Documents {
   readonly sessions:SessionAccess; readonly uploads:Uploads; readonly pdf:PdfJobs;
   private cards=new Map<string,Card>(); private closed=false;
-  constructor(private config:Config,private api:SlackApi,private preparations:Preparations,private options:{state?:State;sessionStore?:MetadataStore;complete?:(card:Card)=>Promise<void>;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof PdfJobs>[0];convertImages?:ConstructorParameters<typeof PdfJobs>[1]}={}) {
+  private markdownWork=new Map<string,Promise<{id:string;url?:string}>>();
+  constructor(private config:Config,private api:SlackApi,private preparations:Preparations,private options:{state?:State;sessionStore?:MetadataStore;complete?:(card:Card)=>Promise<void>;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof PdfJobs>[0];convertImages?:ConstructorParameters<typeof PdfJobs>[1];markdown?:typeof convertMarkdown}={}) {
     this.now=options.now??Date.now;
     const checkSession=async(id:string,actor:Actor)=>{await this.authorize(id,actor);};
     this.sessions=options.sessionStore?new SharedSessions(options.sessionStore,checkSession,this.now):new Sessions(this.now,checkSession);
@@ -39,8 +43,8 @@ export class Documents {
   private now:()=>number;
   checkpoint():void {
     for(const [id,card] of this.cards){
-      const {imageWork:_,updates:__,imageAttempts,pdfAttempt,...record}=card;
-      this.options.state?.put('cards',id,{...record,attempts:imageAttempts?[...imageAttempts].map(([page,attempt])=>[page,savedAttempt(attempt)]):undefined,pdfAttempt:pdfAttempt?savedAttempt(pdfAttempt):undefined});
+      const {imageWork:_,updates:__,imageAttempts,pdfAttempt,markdownAttempt,...record}=card;
+      this.options.state?.put('cards',id,{...record,attempts:imageAttempts?[...imageAttempts].map(([page,attempt])=>[page,savedAttempt(attempt)]):undefined,pdfAttempt:pdfAttempt?savedAttempt(pdfAttempt):undefined,markdownAttempt:markdownAttempt?savedAttempt(markdownAttempt):undefined});
     }
   }
   pendingIds():string[]{return [...this.cards.values()].filter(c=>c.pdf==='pending'||c.imageState==='pending').map(c=>c.id);}
@@ -70,6 +74,14 @@ export class Documents {
         else await this.preview(card,bytes);
       }catch{card.pdf=card.pdf==='ready'?'ready':'failed';card.imageState='failed';await this.options.complete?.(card).catch(()=>{});}
       this.checkpoint();
+    }
+    // Command intent and upload receipts survive a restart, including a lost upload response.
+    for(const card of this.cards.values()){
+      if(!card.messageTs)continue;
+      try{
+        if(card.requestedMode==='markdown'&&!card.markdownAttempt?.saved)await this.exportMarkdown(card.id,card.actor,card.messageTs);
+        if(card.requestedMode==='png'&&card.pdf==='ready'&&card.imageState==='ready'&&(card.images?.length??0)<Math.min(10,card.pageCount??0))await this.morePages(card.id,card.actor,card.messageTs);
+      }catch{/* Preserve receipts and allow a member to retry from the document card. */}
     }
   }
   url(id:string):string{return `${this.config.publicOrigin}/documents/${id}`;}
@@ -115,11 +127,31 @@ export class Documents {
   async publish(job:Readonly<Job>):Promise<void> {
     if(!job.source||!job.bytes||job.state!=='ready')return;
     this.sweep();if(this.closed||this.cards.size>=1000)throw new UserError('busy','문서 요청이 많습니다.');
-    const card:Card={contentHash:job.contentHash,origin:this.config.publicOrigin,id:job.id,actor:{...job.actor},fileId:job.fileId,rootFileId:job.fileId,revision:0,parentTs:job.actor.threadTs,name:job.source.name,size:job.source.size,createdAt:this.now(),pdf:'pending'};
+    const card:Card={requestedMode:job.mode,contentHash:job.contentHash,origin:this.config.publicOrigin,id:job.id,actor:{...job.actor},fileId:job.fileId,rootFileId:job.fileId,revision:0,parentTs:job.actor.threadTs,name:job.source.name,size:job.source.size,createdAt:this.now(),pdf:'pending'};
     this.cards.set(card.id,card);this.checkpoint();
     try {await this.authorize(card.id,card.actor);await this.post(card);}
     catch(error){this.checkpoint();throw error;}
-    void this.preview(card,job.bytes).catch(()=>{});
+    void this.preview(card,job.bytes).then(async()=>{if(job.mode==='png'&&card.pdf==='ready'&&card.messageTs)await this.morePages(card.id,job.actor,card.messageTs);}).catch(()=>{});
+    if(job.mode==='markdown')await this.exportMarkdown(card.id,job.actor,card.messageTs!);
+  }
+  async exportMarkdown(id:string,actor:Actor,messageTs:string):Promise<{id:string;url?:string}>{
+    const card=await this.authorize(id,actor);if(card.messageTs!==messageTs)denied();
+    const existing=this.markdownWork.get(id);
+    if(existing){const result=await existing;await this.authorize(id,actor);return result;}
+    const work=(async()=>{
+      if(card.markdownFileId&&card.markdownAttempt?.saved)return {id:card.markdownFileId,url:card.markdownUrl};
+      const source=await this.ensureSource(id,actor);
+      const bytes=await (this.options.markdown??convertMarkdown)(source,{timeoutMs:120_000});
+      if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_MARKDOWN_BYTES)throw new UserError('markdown_output','Markdown 변환 결과를 확인할 수 없습니다.');
+      await this.authorize(id,actor);
+      const destination={...actor,threadTs:card.actor.threadTs??card.messageTs};
+      const result=await this.uploads.share(card.markdownAttempt??={},bytes,card.name.replace(/\.(hwp|hwpx)$/i,'').slice(0,170)+'.md',destination,async()=>{await this.authorize(id,actor);});
+      card.markdownFileId=result.id;card.markdownUrl=result.url;this.checkpoint();
+      await this.update(card,actor).catch(()=>{});
+      return result;
+    })();
+    this.markdownWork.set(id,work);
+    try{return await work;}finally{if(this.markdownWork.get(id)===work)this.markdownWork.delete(id);}
   }
   revisionName(parent:Card,format:string):string {
     const number=Math.max(0,...[...this.cards.values()].filter(c=>c.rootFileId===parent.rootFileId&&c.actor.channelId===parent.actor.channelId).map(c=>Math.max(c.revision,c.sequence??0)))+1;
@@ -210,5 +242,5 @@ export class Documents {
     for(const [id,c] of this.cards)if(c.actor.teamId===team&&(c.fileId===file||c.rootFileId===file)&&!keep?.has(c.actor.channelId)){this.preparations.invalidateCard(id);this.cards.delete(id);this.options.state?.delete('cards',id);await this.sessions.invalidate(id);}
   }
   sweep():void {for(const [id,c] of this.cards)if(!this.options.state&&this.now()-c.createdAt>=24*60*60_000){this.cards.delete(id);void Promise.resolve(this.sessions.invalidate(id)).catch(()=>{});}this.sessions.sweep();}
-  async close():Promise<void>{await Promise.allSettled([...this.cards.values()].map(c=>c.imageWork));await this.pdf.close();this.checkpoint();this.closed=true;this.cards.clear();this.sessions.clear();}
+  async close():Promise<void>{await Promise.allSettled([...this.cards.values()].map(c=>c.imageWork).concat([...this.markdownWork.values()].map(p=>p.then(()=>{}))));await this.pdf.close();this.checkpoint();this.closed=true;this.cards.clear();this.sessions.clear();}
 }

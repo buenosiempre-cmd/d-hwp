@@ -28,7 +28,7 @@ function trigger(value:unknown):string {
   if (typeof value!=='string' || value.length<1 || value.length>256) throw new UserError('bad_trigger','요청 식별자가 올바르지 않습니다. 다시 요청하세요.');
   return value;
 }
-export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotIdentity,options:{sessionStore?:import('./cloud/metadata').MetadataStore;download?:typeof import('./download').downloadFile;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[0];convertImages?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[1]}={}) {
+export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotIdentity,options:{sessionStore?:import('./cloud/metadata').MetadataStore;download?:typeof import('./download').downloadFile;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[0];convertImages?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[1];markdown?:typeof import('../conversion/convert.mjs').convertMarkdown}={}) {
   const state=config.statePath?new State(config.statePath,config.teamId):undefined;
   const settings=new Settings(config,api,state);config={...config,channelIds:settings.enabled};
   const reactions=new Reactions(api,config.reactions===true,state);
@@ -65,13 +65,14 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
     }
     await args.next();
   });
-  app.command('/rhwp',async({command,ack})=>{
+  app.command(/^\/(?:d|r)hwp$/,async({command,ack})=>{
     try {
       if(command.api_app_id!==config.appId)denied();
-      if(!command.text.trim()||command.text.trim()==='settings'){
+      if(command.text.trim()==='settings'){
         if(!settings.isAdmin(command.team_id,command.user_id)){await ack({response_type:'ephemeral',text:'채널 설정은 rhwp 앱 관리자가 변경할 수 있습니다.'});return;}
         await ack();await settings.open(command.team_id,command.user_id,trigger(command.trigger_id),command.channel_id);return;
       }
+      if(command.team_id===config.teamId)await settings.joined(command.channel_id,botIdentity.botUserId);
       const who=actor(command.team_id,command.user_id,command.channel_id);
       const parsed=parseCommand(command.text,config.workspaceHost);
       if(parsed.kind==='help'){await ack({response_type:'ephemeral',text:HELP});return;}
@@ -83,6 +84,7 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
     await ack(); let who:Actor|undefined;
     try {
       if(shortcut.type!=='message_action')return;
+      if(shortcut.team?.id===config.teamId)await settings.joined(shortcut.channel.id,botIdentity.botUserId);
       who=actor(shortcut.team?.id,shortcut.user.id,shortcut.channel.id);
       const threadTs=shortcut.message.thread_ts??shortcut.message_ts;
       if(typeof threadTs!=='string'||!/^\d+\.\d+$/.test(threadTs))denied();
@@ -125,10 +127,15 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
     const result=preparations.submit(who,fileId,'open','thread:'+key+':'+clock());
     threadRequests.set(key,result.id);state?.put('threads',key,result.id);remember(who,fileId);
   };
+  app.event('member_joined_channel',async({body,event})=>{
+    if(body.team_id!==config.teamId||event.user!==botIdentity.botUserId||!ID.channel.test(event.channel)||typeof body.event_id!=='string')return;
+    const key='joined:'+config.teamId+':'+body.event_id;if(!replays.claim(key))return;
+    try{await settings.joined(event.channel,botIdentity.botUserId);}catch{replays.release(key);}
+  });
   app.event('file_shared',async({body,event})=>{
     if(!documents)return;const e=object(event);
     if(e.user_id===botIdentity.botUserId||typeof e.file_id!=='string'||!ID.file.test(e.file_id)||typeof body.event_id!=='string'||!body.event_id)return;
-    let who:Actor;try{who=actor(body.team_id,e.user_id,e.channel_id);}catch{return;}
+    let who:Actor;try{if(body.team_id===config.teamId&&typeof e.channel_id==='string'&&typeof e.user_id==='string'&&ID.user.test(e.user_id))await settings.joined(e.channel_id,botIdentity.botUserId);who=actor(body.team_id,e.user_id,e.channel_id);}catch{return;}
     if(!replays.claim('file-shared:'+who.teamId+':'+body.event_id))return;
     try{
       const file=object((await api.call('files.info',{file:e.file_id})).file);
@@ -149,6 +156,7 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
     if(!documents)return;const e=object(event);let who:Actor|undefined;
     try{
       if(e.user===botIdentity.botUserId||e.bot_id||typeof body.event_id!=='string'||!body.event_id)return;
+      if(body.team_id===config.teamId&&typeof e.channel==='string'&&typeof e.user==='string'&&ID.user.test(e.user))await settings.joined(e.channel,botIdentity.botUserId);
       who=actor(body.team_id,e.user,e.channel);
       const parent=e.thread_ts??e.ts;if(typeof parent!=='string'||!/^\d+\.\d+$/.test(parent))denied();
       who.threadTs=parent;who.reactionTs=String(e.ts);
@@ -163,7 +171,7 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
           if(attempt<4)await delay(250);
         }
       }
-      if(!files.length){await notice(who,'HWP/HWPX 파일과 함께 @rhwp를 멘션해 주세요. 이전 파일은 해당 메시지 메뉴의 한글 문서 열기로 요청할 수 있습니다.');return;}
+      if(!files.length){await notice(who,'HWP/HWPX 파일과 함께 D-HWP를 멘션해 주세요. 이전 파일은 해당 메시지 메뉴의 동국 한글문서 변환으로 요청할 수 있습니다.');return;}
       if(files.length>10)throw new UserError('too_many_files','한 번에 문서 10개까지 요청할 수 있습니다. 메시지 메뉴에서 문서를 선택해 주세요.');
       for(const fileId of new Set(files)){
         await authorizeFile(api,config,who,fileId);
@@ -186,16 +194,20 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
       await ack();void settings.home(body.team?.id??'',body.user.id).catch(()=>{});
     }catch(error){await ack({response_action:'errors',errors:{channel:userMessage(error)}});}
   });
-  app.action('rhwp_more_pages',async({body,action,ack})=>{
+  for(const actionId of ['rhwp_more_pages','rhwp_export_markdown'])app.action(actionId,async({body,action,ack})=>{
     await ack();if(!documents)return;let who:Actor|undefined;
     try{
       const b=object(body),a=object(action),container=object(b.container);
       who=actor(object(b.team).id,object(b.user).id,container.channel_id);
       if(container.type!=='message'||typeof container.message_ts!=='string'||typeof a.value!=='string')denied();
       if(b.channel&&object(b.channel).id!==who.channelId)denied();
-      await documents.morePages(a.value,who,container.message_ts);
+      if(actionId==='rhwp_export_markdown'){
+        const result=await documents.exportMarkdown(a.value,who,container.message_ts);
+        await notice(who,result.url?`원문 Markdown을 같은 스레드에 첨부했습니다. <${result.url}|Markdown 열기>`:'원문 Markdown을 같은 스레드에 첨부했습니다.');
+      }else await documents.morePages(a.value,who,container.message_ts);
     }catch(error){if(who)await notice(who,userMessage(error)).catch(()=>{});}
   });
+  for(const actionId of ['rhwp_view_pdf','rhwp_browser_edit'])app.action(actionId,async({ack})=>{await ack();});
   app.event('entity_details_requested',async({body,event})=>{
     if(!documents)return;let who:Actor|undefined;
     try {

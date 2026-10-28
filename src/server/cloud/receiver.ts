@@ -10,6 +10,7 @@ import {editorRoutes} from '../editor-routes';
 import {denied,object,userMessage,UserError} from '../errors';
 import type {CloudApplication} from './application';
 import {CloudEvents} from './events';
+import {onboardChannel} from './channel-onboarding';
 const quietLogger:Logger={debug(){},info(){},warn(){},error(){},setLevel(){},getLevel(){return LogLevel.ERROR;},setName(){}};
 const trigger=(v:unknown)=>{if(typeof v!=='string'||!v||v.length>256)denied();return v;};
 const ts=(v:unknown)=>{if(typeof v!=='string'||!/^\d+\.\d+$/.test(v))denied();return v;};
@@ -21,17 +22,19 @@ export function createCloudReceiver(config:Config,documents:CloudApplication,ide
  const app=new App({receiver,logger:quietLogger,ignoreSelf:false,authorize:async({teamId})=>{if(teamId!==config.teamId)denied();return {teamId:config.teamId,botToken:config.botToken,...identity};}});
  app.error(async error=>{throw error;});
  const who=async(team:unknown,user:unknown,channel:unknown):Promise<Actor>=>{
-  if(typeof team!=='string'||typeof user!=='string'||typeof channel!=='string')denied();const actor={teamId:team,userId:user,channelId:channel};await documents.accessConfig(actor);return actor;
+  if(team!==config.teamId||typeof user!=='string'||!ID.user.test(user)||typeof channel!=='string'||!ID.channel.test(channel))denied();
+  await onboardChannel(config,api,store,channel,identity.botUserId);
+  const actor={teamId:team,userId:user,channelId:channel};await documents.accessConfig(actor);return actor;
  };
  const notice=async(actor:Actor,error:unknown)=>{await api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:userMessage(error)});};
  app.use(async args=>{const b=object(args.body);if(b.is_enterprise_install===true||(b.api_app_id!==undefined&&b.api_app_id!==config.appId)||(b.type==='event_callback'&&b.api_app_id!==config.appId)){if('ack' in args&&typeof args.ack==='function')await args.ack();return;}await args.next();});
- app.command('/rhwp',async({command,ack})=>{
+ app.command(/^\/(?:d|r)hwp$/,async({command,ack})=>{
   try{
    if(command.api_app_id!==config.appId)denied();
-   if(!command.text.trim()||command.text.trim()==='settings'){await settings.open(command.team_id,command.user_id,trigger(command.trigger_id),command.channel_id);await ack();return;}
+   if(command.text.trim()==='settings'){await settings.open(command.team_id,command.user_id,trigger(command.trigger_id),command.channel_id);await ack();return;}
    const actor=await who(command.team_id,command.user_id,command.channel_id),parsed=parseCommand(command.text,config.workspaceHost);
    if(parsed.kind==='help'){await ack({response_type:'ephemeral',text:HELP});return;}
-   await documents.submit(actor,parsed.fileId,'command:'+trigger(command.trigger_id));await ack({response_type:'ephemeral',text:'문서 접근 권한을 확인하고 있습니다.'});
+   await documents.submit(actor,parsed.fileId,'command:'+trigger(command.trigger_id),parsed.mode);await ack({response_type:'ephemeral',text:'문서 접근 권한을 확인하고 있습니다.'});
   }catch(error){await ack({response_type:'ephemeral',text:userMessage(error)});}
  });
  app.shortcut('rhwp_open_document',async({shortcut,ack})=>{
@@ -73,17 +76,17 @@ export function createCloudReceiver(config:Config,documents:CloudApplication,ide
    await events.enqueue('settings-home:'+view.id+':'+view.hash,{kind:'home',user:body.user.id});await ack();
   }catch(error){await ack({response_action:'errors',errors:{channel:userMessage(error)}});}
  });
- for(const actionId of ['rhwp_more_pages','rhwp_retry_preview'])app.action(actionId,async({body,action,ack})=>{
+ for(const actionId of ['rhwp_more_pages','rhwp_retry_preview','rhwp_export_markdown'])app.action(actionId,async({body,action,ack})=>{
   const b=object(body),a=object(action),c=object(b.container);
   const actor=await who(object(b.team).id,object(b.user).id,c.channel_id);
   if(c.type!=='message'||typeof a.value!=='string'||!a.value||a.value.length>128||(b.channel&&object(b.channel).id!==actor.channelId))denied();
   const messageTs=ts(c.message_ts),actionTs=ts(a.action_ts);
   const key=createHash('sha256').update(JSON.stringify([actionId,actor.teamId,actor.userId,actor.channelId,a.value,messageTs,actionTs])).digest('hex');
   // Return only after durable handoff. Slack lookups, card locks and notifications run on the worker.
-  await events.enqueue('action:'+key,{kind:actionId==='rhwp_retry_preview'?'retry_preview':'more_pages',actor,cardId:a.value,messageTs});
+  await events.enqueue('action:'+key,{kind:actionId==='rhwp_export_markdown'?'export_markdown':actionId==='rhwp_retry_preview'?'retry_preview':'more_pages',actor,cardId:a.value,messageTs});
   await ack();
  });
- app.action('rhwp_browser_edit',async({ack})=>{await ack();});
+ for(const actionId of ['rhwp_browser_edit','rhwp_view_pdf'])app.action(actionId,async({ack})=>{await ack();});
  app.event('entity_details_requested',async({body,event})=>{
   let actor:Actor|undefined;try{const e=object(event);actor=await who(body.team_id,e.user,e.channel);const ref=object(e.external_ref);
    if(ref.type!=='document'||typeof ref.id!=='string')denied();if(!await documents.matchesUrl(ref.id,e.entity_url))return;

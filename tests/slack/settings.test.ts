@@ -10,7 +10,7 @@ import {FakeApi,config,actor,signed,command} from './support';
 const envelope=(id:string,event:Record<string,unknown>)=>({type:'event_callback',api_app_id:'ATEST',team_id:'TTEST',event_id:id,event});
 const shared={type:'file_shared',user_id:'UTEST',channel_id:'CTEST',file_id:'FTEST'};
 async function until(check:()=>boolean){for(let i=0;i<200;i++){if(check())return;await new Promise(r=>setTimeout(r,5));}assert.fail('operation missing');}
-test('only configured admins can enable a channel; bot membership and requesting admin membership are required',async()=>{
+test('only configured admins can change channel policy; bot membership and requesting admin membership are required',async()=>{
   const api=new FakeApi(),settings=new Settings({...config,adminIds:new Set(['UTEST'])},api);
   api.handler=async(method,args)=>method==='conversations.info'?{ok:true,channel:{...(api.response(method,args).channel as object),id:args.channel}}:api.response(method,args);
   assert.equal(settings.mode('CNEW'),'off');
@@ -20,6 +20,47 @@ test('only configured admins can enable a channel; bot membership and requesting
   await settings.set({...actor,channelId:'CNEW'},'off');assert.equal(settings.enabled.has('CNEW'),false);
   api.handler=async(method,args)=>method==='conversations.info'?{ok:true,channel:{...(api.response(method,args).channel as object),id:args.channel,is_member:false}}:api.response(method,args);
   await assert.rejects(settings.set({...actor,channelId:'CNEW'},'auto'));assert.equal(settings.enabled.has('CNEW'),false);
+});
+test('a verified invitation enables a new channel, welcomes once, and survives restart without a bootstrap allowlist',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'dhwp-invitation-')),path=join(dir,'state.sqlite'),api=new FakeApi();let state=new State(path,'TTEST');
+  const empty={...config,channelIds:new Set<string>()};
+  api.handler=async(method,args)=>method==='conversations.info'?{ok:true,channel:{...(api.response(method,args).channel as object),id:args.channel}}:api.response(method,args);
+  try{
+    const settings=new Settings(empty,api,state);assert.equal(settings.mode('CNEW'),'off');
+    await settings.joined('CNEW','UBOT');assert.equal(settings.mode('CNEW'),'auto');assert.ok(settings.enabled.has('CNEW'));
+    const welcome=api.calls.filter(c=>c.method==='chat.postMessage');assert.equal(welcome.length,1);assert.equal(welcome[0].args.channel,'CNEW');assert.match(JSON.stringify(welcome[0].args),/원문 Markdown/);
+    assert.equal(api.calls.some(c=>c.method==='conversations.members'),false);
+    await settings.joined('CNEW','UBOT');assert.equal(api.calls.filter(c=>c.method==='chat.postMessage').length,1);
+    state.close();state=new State(path,'TTEST');const restored=new Settings(empty,api,state);assert.equal(restored.mode('CNEW'),'auto');assert.ok(restored.enabled.has('CNEW'));
+    await restored.joined('CNEW','UBOT');assert.equal(api.calls.filter(c=>c.method==='chat.postMessage').length,1);
+  }finally{state.close();rmSync(dir,{recursive:true,force:true});}
+});
+test('reinvitation preserves explicit off and mention policies without welcoming or enabling again',async()=>{
+  const api=new FakeApi(),settings=new Settings({...config,adminIds:new Set(['UTEST'])},api);
+  for(const mode of ['off','mention'] as const){
+    await settings.set(actor,mode);await settings.joined('CTEST','UBOT');assert.equal(settings.mode('CTEST'),mode);assert.equal(settings.enabled.has('CTEST'),mode==='mention');
+  }
+  assert.equal(api.calls.some(c=>c.method==='chat.postMessage'),false);
+});
+test('invitation rejects unverified bot membership, shared or wrong-workspace channels and invalid identifiers',async()=>{
+  const overrides=[{is_member:false},{is_ext_shared:true},{context_team_id:'TOTHER'},{shared_team_ids:['TTEST','TOTHER']},{is_archived:true}];
+  for(const override of overrides){
+    const api=new FakeApi(),settings=new Settings({...config,channelIds:new Set<string>()},api);
+    api.handler=async(method,args)=>method==='conversations.info'?{ok:true,channel:{...(api.response(method,args).channel as object),id:args.channel,...override}}:api.response(method,args);
+    await assert.rejects(settings.joined('CNEW','UBOT'));assert.equal(settings.mode('CNEW'),'off');assert.equal(settings.enabled.has('CNEW'),false);assert.equal(api.calls.some(c=>c.method==='chat.postMessage'),false);
+  }
+  const api=new FakeApi(),settings=new Settings({...config,channelIds:new Set<string>()},api);
+  await assert.rejects(settings.joined('not-a-channel','UBOT'));await assert.rejects(settings.joined('CNEW','not-a-user'));assert.equal(api.calls.length,0);
+});
+test('an administrator policy saved while invitation authorization is pending wins',async()=>{
+  const api=new FakeApi(),settings=new Settings({...config,channelIds:new Set<string>(),adminIds:new Set(['UTEST'])},api);
+  let release!:()=>void;let reached!:()=>void;const waiting=new Promise<void>(resolve=>{reached=resolve;}),pending=new Promise<void>(resolve=>{release=resolve;});let first=true;
+  api.handler=async(method,args)=>{
+    if(method==='conversations.info'){if(first){first=false;reached();await pending;}return {ok:true,channel:{...(api.response(method,args).channel as object),id:args.channel}};}
+    return api.response(method,args);
+  };
+  const invitation=settings.joined('CNEW','UBOT');await waiting;await settings.set({...actor,channelId:'CNEW'},'off');release();await invitation;
+  assert.equal(settings.mode('CNEW'),'off');assert.equal(settings.enabled.has('CNEW'),false);assert.equal(api.calls.some(c=>c.method==='chat.postMessage'),false);
 });
 test('stored channel policy wins over bootstrap env after restart',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'rhwp-settings-')),path=join(dir,'state.sqlite'),api=new FakeApi();let state=new State(path,'TTEST');

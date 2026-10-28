@@ -102,7 +102,7 @@ test('first upload before bot join initializes auto; repeated join welcomes once
   assert.equal(await f.application.mode('CTEST'),'auto');assert.equal((await f.store.list('cards')).length,1);
   await signed(f.origin,join,{json:true});await f.drain();
   await signed(f.origin,{...join,event_id:'EJOIN45B'},{json:true});await f.drain();
-  assert.equal(f.api.calls.filter(c=>c.method==='chat.postMessage'&&String(c.args.text).startsWith('이제 이 채널')).length,1);
+  assert.equal(f.api.calls.filter(c=>c.method==='chat.postMessage'&&String(c.args.text).startsWith('D-HWP · 이 채널')).length,1);
   for(const mode of ['mention','off'] as const){
    await f.runtime.settings.set({teamId:'TTEST',userId:'UTEST',channelId:'CTEST'},mode);
    await signed(f.origin,{...join,event_id:'EJOIN45'+mode},{json:true});await f.drain();assert.equal(await f.application.mode('CTEST'),mode);
@@ -121,11 +121,14 @@ test('own bot join initializes channel; ordinary members and inaccessible channe
   await signed(f.origin,{...join,event_id:'EJOIN46C',event:{...join.event,user:'UBOT'}},{json:true});await f.drain();assert.equal(await f.application.mode('CTEST'),'auto');
  }finally{await f.close();}
 });
-test('bare rhwp opens channel settings; ordinary user cannot change settings',async()=>{
+test('bare D-HWP shows conversion help; settings remains explicit and admin-only',async()=>{
  const f=await start();try{
-  await signed(f.origin,new URLSearchParams(command({text:'',channel_id:'CNEW'})));
+  const help=await signed(f.origin,new URLSearchParams(command({command:'/dhwp',text:''})));
+  assert.match(await help.text(),/Markdown/);
+  assert.equal(f.api.calls.filter(c=>c.method==='views.open').length,0);
+  await signed(f.origin,new URLSearchParams(command({text:'settings',channel_id:'CNEW'})));
   assert.equal(f.api.calls.filter(c=>c.method==='views.open').length,1);
-  await signed(f.origin,new URLSearchParams(command({text:'',user_id:'UOTHER'})));
+  await signed(f.origin,new URLSearchParams(command({text:'settings',user_id:'UOTHER'})));
   assert.equal(f.api.calls.filter(c=>c.method==='views.open').length,1);
  }finally{await f.close();}
 });
