@@ -39,4 +39,6 @@ rhwp for Slack의 자체 코드·문서에는 MIT License를 적용합니다. �
 
 ## 독립 품질 비교 도구
 
-Kordoc 4.19.1 (MIT, [chrisryugj/kordoc](https://github.com/chrisryugj/kordoc))을 로컬 합성 문서 비교에 사용합니다. 운영 서버 의존성이 아니며 비교 실행 시 사용자가 별도로 설치한 모듈 경로를 명시합니다.
+Kordoc 4.19.1 (MIT, [chrisryugj/kordoc](https://github.com/chrisryugj/kordoc))을 로컬 합성 문서 비교에 사용합니다. 본문 비교와 선택적 오프라인 그림 OCR에 사용합니다. 별도로 설치한 정확한 버전의 모듈 경로를 명시하며 앱 기본 의존성으로 배포하지 않습니다.
+
+OCR 프로필은 PaddlePaddle PP-OCRv5 mobile detection / Korean recognition ONNX 모델(Apache-2.0)을 고정 SHA256으로 확인합니다. [검출 모델 출처](https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx), [한국어 인식 모델 출처](https://huggingface.co/PaddlePaddle/korean_PP-OCRv5_mobile_rec_onnx). 별도 배포하는 모델·ONNX Runtime·sharp에도 원래 라이선스·NOTICE를 유지합니다.

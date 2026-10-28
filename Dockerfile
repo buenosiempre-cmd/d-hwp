@@ -44,7 +44,7 @@ FROM runtime AS smoke
 COPY tests ./tests
 COPY slack/manifest.json ./slack/manifest.json
 COPY playwright.config.ts ./playwright.config.ts
-COPY scripts/run-tests.mjs scripts/serve-viewer.mjs scripts/serve-desk.mjs scripts/container-smoke.mjs scripts/export-pages.mjs scripts/studio-bootstrap.mjs scripts/pages-headers.mjs scripts/public-site.mjs ./scripts/
+COPY scripts/run-tests.mjs scripts/verify-public-documents.mjs scripts/serve-viewer.mjs scripts/serve-desk.mjs scripts/container-smoke.mjs scripts/export-pages.mjs scripts/studio-bootstrap.mjs scripts/pages-headers.mjs scripts/public-site.mjs ./scripts/
 COPY site ./site
 COPY studio/adapters ./studio/adapters
 CMD ["node", "scripts/container-smoke.mjs"]

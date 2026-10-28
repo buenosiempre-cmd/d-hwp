@@ -23,7 +23,7 @@
 | `/dhwp help` | 사용법 |
 | `/dhwp settings` | 관리자용 채널 설정 |
 
-기본 미리보기는 PDF와 첫 3쪽 이미지입니다. 갤러리는 앞 10쪽까지 제공합니다. 그 이후 쪽도 **형식·쪽 선택 → 선택 쪽 PNG ZIP**으로 받을 수 있습니다(문서 전체 200쪽 이내, 선택 최대 10쪽). **문서 Markdown ZIP**에는 본문·병합/중첩 표·각주/미주·머리말/꼬리말·글상자·수식 원문·필드/링크 정보, 그림 파일, 원본, `report.json`이 들어갑니다. AI 호출 없이 생성합니다. 그림 속 글자 OCR과 시각적 의미, HWP 엔진이 인식하지 못한 내용까지 완전하게 읽었다고 보장하지 않습니다. [구조 추출과 Kordoc 대조 범위](docs/d-hwp-markdown.md)를 확인하세요.
+기본 미리보기는 PDF와 첫 3쪽 이미지입니다. 갤러리는 앞 10쪽까지 제공합니다. 그 이후 쪽도 **형식·쪽 선택 → 선택 쪽 PNG ZIP**으로 받을 수 있습니다(문서 전체 200쪽 이내, 선택 최대 10쪽). **문서 Markdown ZIP**에는 본문·병합/중첩 표·각주/미주·머리말/꼬리말·글상자·수식 원문·필드/링크 정보, 그림 파일, 원본, `report.json`이 들어갑니다. AI 호출 없이 생성합니다. 선택적 오프라인 그림 OCR을 보충 결과로 제공하며, 시각적 의미와 HWP 엔진이 인식하지 못한 내용까지 완전하게 읽었다고 보장하지 않습니다. [구조 추출과 Kordoc 대조 범위](docs/d-hwp-markdown.md)를 확인하세요.
 
 새 앱은 `/dhwp`를 등록합니다. 서버는 기존 `/rhwp` 요청도 호환 처리하지만 새 manifest에 중복 등록하지 않아 기존 rhwp 앱의 명령을 가로채지 않습니다.
 
@@ -69,6 +69,7 @@ npm test
 npm run test:slack
 npm run test:security
 npm run test:viewer
+npm run test:corpus
 # 로컬 작업실 변경이 있는 경우
 npm run build:desk
 npm run test:desk
@@ -80,7 +81,7 @@ npm run test:desk
 - [규정 MCP 설정](docs/d-hwp-mcp.md)
 - [구성원 업무 편의 개선](docs/d-hwp-upgrades.md)
 - [문서 구조 Markdown과 Kordoc 대조](docs/d-hwp-markdown.md)
-- [이번 업그레이드 계획](mydocs/plans/task_m001_11.md)
+- [이번 업그레이드 계획](mydocs/plans/task_m001_13.md)
 - [기반 프로젝트 개발 문서](docs/README.md): upstream 운영 이력은 D-HWP 배포 설정으로 재사용하지 않습니다.
 
 ## 출처와 라이선스

@@ -1,6 +1,6 @@
 # 문서 구조 Markdown과 원본 대조
 
-`/dhwp md <Slack 파일 링크>` 또는 문서 카드의 **문서 Markdown (ZIP)** 버튼으로 요청한다. ZIP 안의 `document.md`를 읽고 `report.json`의 검토 항목을 함께 확인한다. 원본과 개체는 같은 ZIP에 있다. 실제 Slack 설치와 업로드 수용 검증은 아직 별도 진행 사항이다.
+`/dhwp md <Slack 파일 링크>` 또는 문서 카드의 **문서 Markdown (ZIP)** 버튼으로 요청한다. ZIP 안의 `README.md`에서 짧은 한국어 검토 안내를 먼저 읽고, `document.md`와 `report.json`을 확인한다. 원본과 개체는 같은 ZIP에 있다. 실제 Slack 설치와 업로드 수용 검증은 아직 별도 진행 사항이다.
 
 ## 담는 내용
 
@@ -23,7 +23,7 @@ Markdown 2 MiB, 보고서 2 MiB, 포함 개체 합계 25 MiB, 전체 패키지 5
 
 `coverage`는 **파싱된 XML의 공백이 아닌 텍스트 노드**와 출력의 대응이다. 100% 대응도 모든 시각 의미, 속성 의미, 그림 속 글자, HWP 엔진이 인식하지 못한 바이너리 내용까지 검증했다는 뜻은 아니다. 원본을 함께 보존하더라도 그 내용을 모두 Markdown으로 해석했다는 뜻은 아니다.
 
-그림 속 글자 OCR, 도형의 의미, 복잡한 배치와 미지원 개체는 원본·PDF와 확인해야 한다. HWP 변환에는 항상 엔진 입력 범위에 대한 검토 항목을 남긴다. `needs_review`는 이런 검토가 남았다는 뜻이다. 현재 서비스는 임의의 모든 문서에 무누락 보증을 제공하지 않는다.
+그림 속 글자는 로컬 OCR 설정 시 별도 보충 섹션에 담으며 인식 오류·누락 가능성을 표시한다. 도형의 의미, 복잡한 배치와 미지원 개체는 원본·PDF와 확인해야 한다. HWP 변환에는 항상 엔진 입력 범위에 대한 검토 항목을 남긴다. `needs_review`는 이런 검토가 남았다는 뜻이다. 현재 서비스는 임의의 모든 문서에 무누락 보증을 제공하지 않는다.
 
 ## Kordoc으로 실제 대조한 범위
 
@@ -38,7 +38,7 @@ Markdown 2 MiB, 보고서 2 MiB, 포함 개체 합계 25 MiB, 전체 패키지 5
 
 이는 합성 문서 하나를 두 형식으로 직렬화한 결과이며 범용 우열·정확도 점수가 아니다. 수식 표식 비교도 수학적 동등성을 증명하지 않는다. 실제 통합 테스트는 원본·그림의 정확한 바이트/해시와 병합 셀 좌표도 별도로 검사한다. Kordoc 결과는 독립 참고 자료로 사용하며 최종 Markdown에 그대로 합치지 않는다.
 
-별도 설치한 Kordoc 모듈 경로로 재현할 수 있다. 운영 서버에는 Kordoc이나 OCR 모델을 추가하지 않았다.
+별도 설치한 Kordoc 모듈 경로로 재현할 수 있다. Kordoc 본문 파서는 독립 검증에 사용한다. 선택적 로컬 그림 OCR은 아래 고정 프로필로 운영 변환에 연결할 수 있다.
 
 ```sh
 node scripts/audit-markdown-kordoc.mjs \
@@ -47,3 +47,39 @@ node scripts/audit-markdown-kordoc.mjs \
 ```
 
 다음 품질 검증은 실제 대표 양식의 승인된 표본으로 진행해야 한다. 다단 문서·번호 목록·변경 추적·스캔 첨부·수식·도형을 각각 포함하고, 개인정보가 있는 원본을 저장소나 공개 이슈에 넣지 않는다.
+
+
+## 반복 검증과 의미 보존 보강
+
+공개 시험 문서 8개의 고정 커밋·SHA256·라이선스·기대 본문은 `tests/corpus/public-documents.json`에 있다. 원문은 Git에 넣지 않고 지정한 `.cache`에만 내려받는다. 기대값은 메타데이터 부록이 아니라 본문·정확한 표 셀에서 검사하고, 원본/그림 해시도 대조한다.
+
+```sh
+npm run test:corpus
+# 내려받아 검증된 캐시로 반복할 때
+npm run test:corpus -- --offline
+```
+
+실제 문서에서 확인된 동적 PAGE/TOTAL_PAGE는 저장된 정적 숫자를 실제 쪽 번호처럼 제시하지 않고 동적 번호와 검토 필요성을 표시한다. 개요 번호 정의는 보존하며 표시 번호는 원본과 대조한다. XML 대체 표현은 가지 관계를 명시하고, 삽입/삭제 이력은 적용 범위를 표시한다. 연속 굵은/기울임 글씨는 원문에 없는 Markdown 기호가 생기지 않도록 안전한 서식 표기를 사용한다.
+
+## 선택적 오프라인 그림 OCR
+
+운영자 환경에서 다음 두 경로를 함께 설정한다. Slack 사용자는 실행 모듈이나 모델 경로를 지정할 수 없다.
+
+```dotenv
+DHWP_KORDOC_MODULE=/absolute/kordoc-4.19.1/node_modules/kordoc/dist/index.js
+DHWP_KORDOC_MODEL_CACHE=/absolute/d-hwp/ocr-models
+```
+
+Kordoc **4.19.1**의 실행 파일 70개와 진입 파일, PP-OCR 한국어 모델 3개의 고정 SHA256을 import 전에 검사한다. 캐시에는 `ppocr/det.onnx`, `ppocr/rec_korean.onnx`, `ppocr/rec_korean.yml`이 있어야 한다. 모델은 별도 준비하며 변환 중 다운로드하지 않는다. `KORDOC_OFFLINE=1`과 fetch 차단을 적용한 자격 증명 없는 별도 프로세스에서 실행한다. Docker 기본 이미지에는 이 외부 OCR 런타임·모델을 넣지 않았으므로 운영 환경별 경로·네이티브 의존성을 준비해야 한다.
+
+PNG/JPEG/WebP, 그림당 5 MiB·1,600만 픽셀, 문서당 최대 10개·총 60초로 제한한다. GIF·여러 프레임·지원하지 않는 개체와 한도 초과는 별도 미처리로 표시한다. 원본 그림 전체에 대한 OCR이며 문서에서 잘라 보인 영역·회전·겹침·시각적 의미를 복원하지 않는다.
+
+결과는 원문 구조와 구분된 **그림 OCR 보충 결과** 섹션에 넣고 항상 검토 대상으로 표시한다. `report.ocr`에 자산별 상태·해시·경고를 기록한다. OCR 실행 환경 또는 시간 제한 실패는 패키지를 성공으로 저장하지 않으므로 환경 복구 후 같은 카드에서 다시 요청할 수 있다. 일반 패키지와 OCR 패키지는 다른 영수증으로 관리한다.
+
+실제 시험에서는 macOS arm64/Node 24.21.0에서 한글·날짜·금액·인원을 포함한 합성 PNG를 HWP와 HWPX에 삽입해 전체 ZIP 경로를 검증했다. 양쪽 모두 4개 검사 문구를 공백 제외 기준으로 확인했으나 띄어쓰기 오류가 있었다. OCR 경고가 없더라도 숫자·금액·날짜를 확인해야 한다.
+
+```sh
+node scripts/audit-document-ocr.mjs --module /absolute/kordoc/dist/index.js \
+  --model-cache /absolute/ocr-models --image /absolute/synthetic.png \
+  --output-dir .cache/document-ocr-audit
+```
