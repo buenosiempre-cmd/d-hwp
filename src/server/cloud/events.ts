@@ -39,7 +39,7 @@ export class CloudEvents {
   if(!claimed){report('duplicate');return;}
   let state:'sent'|'failed'='sent',failure:unknown;
   const exportFailure=['conversion_page_selection','conversion_text_limit','conversion_text_empty','conversion_zip_limit'].includes(context.failureCode)?userMessage({code:context.failureCode}):'파일 내보내기를 완료하지 못했습니다. 원본의 공유 상태와 선택한 쪽을 확인하고 다시 요청해 주세요. TXT는 2 MiB, ZIP은 최대 10쪽·26 MiB까지 지원합니다.';
-  try{await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:input.kind==='export_file'?exportFailure:input.kind==='export_markdown'?'Markdown 변환을 완료하지 못했습니다. 원본 파일의 공유 상태를 확인하고 문서 카드에서 다시 요청해 주세요. 결과는 2 MiB까지 지원합니다.':'한글 문서 요청을 완료하지 못했습니다. 앱의 채널 참여와 파일 공유 상태를 확인한 뒤 다시 요청해 주세요. 문제가 계속되면 관리자에게 앱 연결과 권한 확인을 요청해 주세요.'},signal);}
+  try{await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:input.kind==='export_file'?exportFailure:input.kind==='export_markdown'?'Markdown 변환을 완료하지 못했습니다. 원본 파일의 공유 상태를 확인하고 문서 카드에서 다시 요청해 주세요. Markdown은 2 MiB, 전체 패키지는 50 MiB까지 지원합니다.':'한글 문서 요청을 완료하지 못했습니다. 앱의 채널 참여와 파일 공유 상태를 확인한 뒤 다시 요청해 주세요. 문제가 계속되면 관리자에게 앱 연결과 권한 확인을 요청해 주세요.'},signal);}
   catch(error){state='failed';failure=error;}
   report(state,failure);
   // Recording a send attempt first avoids duplicate posts after ambiguous responses or crashes.
@@ -61,13 +61,13 @@ export class CloudEvents {
     if(input.kind==='export_file'){
      const request=normalizeExportRequest(input.request),result=await app.exportFile(input.cardId!,actor,input.messageTs!,request,context);
      await app.authorize(input.cardId!,actor,context);
-     const label=request.format==='txt'?'원문 TXT':'선택 쪽 PNG ZIP';
+     const label=request.format==='txt'?'원문 TXT':request.format==='markdown'?'문서 Markdown ZIP':'선택 쪽 PNG ZIP';
      await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:result.url?`${label}을 같은 스레드에 첨부했습니다. <${result.url}|파일 열기>`:`${label}을 같은 스레드에 첨부했습니다.`},context.signal);
     }
     else if(input.kind==='export_markdown'){
      const result=await app.exportMarkdown(input.cardId!,actor,input.messageTs!,context);
      await app.authorize(input.cardId!,actor,context);
-     await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:result.url?`원문 Markdown을 같은 스레드에 첨부했습니다. <${result.url}|Markdown 열기>`:'원문 Markdown을 같은 스레드에 첨부했습니다.'},context.signal);
+     await app.api.call('chat.postEphemeral',{channel:actor.channelId,user:actor.userId,text:result.url?`문서 Markdown ZIP을 같은 스레드에 첨부했습니다. ZIP의 document.md와 report.json을 함께 확인하세요. <${result.url}|Markdown ZIP 받기>`:'문서 Markdown ZIP을 같은 스레드에 첨부했습니다. ZIP의 document.md와 report.json을 함께 확인하세요.'},context.signal);
     }
     else if(input.kind==='retry_preview')await app.retryPreview(input.cardId!,actor,input.messageTs!,spec.cardId);
     else await app.morePages(input.cardId!,actor,input.messageTs!,spec.cardId);

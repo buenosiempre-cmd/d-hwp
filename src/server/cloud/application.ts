@@ -24,7 +24,7 @@ import {UserError,denied} from '../errors';
 import {slackDiagnostics,isSlackFailure} from '../slack-diagnostics';
 import {validateDocument} from '../validate-document';
 import {validateInput} from '../../shared/errors';
-import {convertPreview,convertPageImages,convertMarkdown,MAX_MARKDOWN_BYTES,type PageImage} from '../../conversion/convert.mjs';
+import {convertPreview,convertPageImages,convertMarkdownPackage,MAX_MARKDOWN_BYTES,MAX_MARKDOWN_PACKAGE_BYTES,type PageImage} from '../../conversion/convert.mjs';
 import type {Mode} from '../commands';
 import {normalizeExportRequest,exportKey,exportName,savedExports,MAX_DOCUMENT_EXPORTS,type ExportRequest} from '../document-exports';
 import {convertText,convertPageZip,MAX_TEXT_BYTES,MAX_ZIP_BYTES} from '../../conversion/convert.mjs';
@@ -35,7 +35,7 @@ const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex
 const stableId=(value:string)=>{const h=hash(value);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;};
 export class CloudApplication {
   readonly sessions:SharedSessions;
-  constructor(readonly config:Config,readonly api:SlackApi,readonly store:MetadataStore,readonly tasks:DurableTasks,private options:{download?:typeof downloadFile;convert?:typeof convertPreview;images?:typeof convertPageImages;markdown?:typeof convertMarkdown;text?:typeof convertText;zip?:typeof convertPageZip;fetcher?:typeof fetch;noticeIdentity?:{generation:string;botUserId:string;check:()=>Promise<void>}}={}){
+  constructor(readonly config:Config,readonly api:SlackApi,readonly store:MetadataStore,readonly tasks:DurableTasks,private options:{download?:typeof downloadFile;convert?:typeof convertPreview;images?:typeof convertPageImages;markdown?:typeof convertMarkdownPackage;text?:typeof convertText;zip?:typeof convertPageZip;fetcher?:typeof fetch;noticeIdentity?:{generation:string;botUserId:string;check:()=>Promise<void>}}={}){
     this.sessions=new SharedSessions(store,async(id,actor)=>{await this.authorize(id,actor);});
   }
   async mode(channel:string):Promise<'auto'|'mention'|'off'>{
@@ -99,22 +99,7 @@ export class CloudApplication {
     return this.schedulePreview(id,actor,messageTs,'images',requestId);
   }
   async exportMarkdown(id:string,actor:Actor,messageTs:string,task?:TaskContext):Promise<{id:string;url?:string}>{
-    await this.authorize(id,actor,task);
-    return this.locked(id,async(card,lease)=>{
-      const context:LeaseContext={...lease,signal:AbortSignal.any([lease.signal,...(task?[task.signal]:[])]),checkpoint:async()=>{await lease.checkpoint();await task?.checkpoint();}};
-      await context.checkpoint();await this.authorize(id,actor,context);
-      if(card.messageTs!==messageTs)denied();
-      if(card.markdownFileId&&card.markdownAttempt?.saved)return {id:card.markdownFileId,url:card.markdownUrl};
-      const source=await this.ensureSource(id,actor,context.signal);
-      const bytes=await (this.options.markdown??convertMarkdown)(source,{timeoutMs:120_000,signal:context.signal});
-      if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_MARKDOWN_BYTES)throw new UserError('markdown_output','Markdown 변환 결과를 확인할 수 없습니다.');
-      await this.authorize(id,actor,context);
-      const destination={...actor,threadTs:card.actor.threadTs??card.messageTs};
-      const result=await this.uploads(card,context).share(card.markdownAttempt??={},bytes,card.name.replace(/\.(hwp|hwpx)$/i,'').slice(0,170)+'.md',destination,async()=>{await this.authorize(id,actor,context);});
-      card.markdownFileId=result.id;card.markdownUrl=result.url;await this.write(card,context);
-      try{await this.update(card,actor,context);}catch{/* The confirmed file receipt remains authoritative. */}
-      return result;
-    });
+    return this.exportFile(id,actor,messageTs,{format:'markdown'},task);
   }
   async exportFile(id:string,actor:Actor,messageTs:string,value:ExportRequest,task?:TaskContext):Promise<{id:string;url?:string}>{
     const request=normalizeExportRequest(value),key=exportKey(request);
@@ -143,6 +128,9 @@ export class CloudApplication {
         bytes=await (this.options.text??convertText)(source,{timeoutMs:120_000,signal:context.signal});
         if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_TEXT_BYTES)throw new UserError('export_output','TXT 변환 결과를 확인할 수 없습니다.');
         try{new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{throw new UserError('export_output','TXT 변환 결과를 확인할 수 없습니다.');}
+      }else if(request.format==='markdown'){
+        const result=await (this.options.markdown??convertMarkdownPackage)(source,{timeoutMs:120_000,signal:context.signal});bytes=result.zip;
+        if(!Buffer.isBuffer(result.markdown)||!result.markdown.length||result.markdown.length>MAX_MARKDOWN_BYTES||!result.report||result.report.schemaVersion!==1||!Buffer.isBuffer(bytes)||bytes.length<22||bytes.length>MAX_MARKDOWN_PACKAGE_BYTES||bytes.readUInt32LE(0)!==0x04034b50)throw new UserError('markdown_output','문서 Markdown 패키지를 확인할 수 없습니다.');
       }else{
         const result=await (this.options.zip??convertPageZip)(source,{pages:request.pages,timeoutMs:120_000,signal:context.signal});
         if(!Number.isSafeInteger(result.pageCount)||result.pageCount<1||result.pageCount>200||(card.pageCount!==undefined&&card.pageCount!==result.pageCount)||!Array.isArray(result.pages)||result.pages.length!==request.pages.length||result.pages.some((page,index)=>page!==request.pages[index]||page>result.pageCount)||!Buffer.isBuffer(result.zip)||result.zip.length<22||result.zip.length>MAX_ZIP_BYTES||result.zip.readUInt32LE(0)!==0x04034b50)throw new UserError('export_output','선택한 쪽의 ZIP 변환 결과를 확인할 수 없습니다.');

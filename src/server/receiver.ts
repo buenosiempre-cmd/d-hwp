@@ -30,7 +30,7 @@ function trigger(value:unknown):string {
   if (typeof value!=='string' || value.length<1 || value.length>256) throw new UserError('bad_trigger','요청 식별자가 올바르지 않습니다. 다시 요청하세요.');
   return value;
 }
-export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotIdentity,options:{sessionStore?:import('./cloud/metadata').MetadataStore;download?:typeof import('./download').downloadFile;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[0];convertImages?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[1];markdown?:typeof import('../conversion/convert.mjs').convertMarkdown;text?:typeof import('../conversion/convert.mjs').convertText;zip?:typeof import('../conversion/convert.mjs').convertPageZip}={}) {
+export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotIdentity,options:{sessionStore?:import('./cloud/metadata').MetadataStore;download?:typeof import('./download').downloadFile;now?:()=>number;fetcher?:typeof fetch;convert?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[0];convertImages?:ConstructorParameters<typeof import('./pdf-jobs').PdfJobs>[1];markdown?:typeof import('../conversion/convert.mjs').convertMarkdownPackage;text?:typeof import('../conversion/convert.mjs').convertText;zip?:typeof import('../conversion/convert.mjs').convertPageZip}={}) {
   const state=config.statePath?new State(config.statePath,config.teamId):undefined;
   const settings=new Settings(config,api,state);config={...config,channelIds:settings.enabled};
   const reactions=new Reactions(api,config.reactions===true,state);
@@ -226,7 +226,7 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
     try{
       const result=await documents!.exportFile(selection.cardId,selection.actor,selection.messageTs,request);
       await documents!.authorize(selection.cardId,selection.actor);
-      const label=request.format==='txt'?'원문 TXT':'선택 쪽 PNG ZIP';
+      const label=request.format==='txt'?'원문 TXT':request.format==='markdown'?'문서 Markdown ZIP':'선택 쪽 PNG ZIP';
       await notice(selection.actor,result.url?`${label}을 같은 스레드에 첨부했습니다. <${result.url}|${label} 열기>`:`${label}을 같은 스레드에 첨부했습니다.`);
     }catch(error){await notice(selection.actor,userMessage(error)).catch(()=>{});}
   });
@@ -239,7 +239,7 @@ export function createSlackReceiver(config:Config,api:SlackApi,botIdentity:BotId
       if(b.channel&&object(b.channel).id!==who.channelId)denied();
       if(actionId==='rhwp_export_markdown'){
         const result=await documents.exportMarkdown(a.value,who,container.message_ts);
-        await notice(who,result.url?`원문 Markdown을 같은 스레드에 첨부했습니다. <${result.url}|Markdown 열기>`:'원문 Markdown을 같은 스레드에 첨부했습니다.');
+        await notice(who,result.url?`문서 Markdown ZIP을 같은 스레드에 첨부했습니다. ZIP의 document.md와 report.json을 함께 확인하세요. <${result.url}|Markdown ZIP 받기>`:'문서 Markdown ZIP을 같은 스레드에 첨부했습니다. ZIP의 document.md와 report.json을 함께 확인하세요.');
       }else await documents.morePages(a.value,who,container.message_ts);
     }catch(error){if(who)await notice(who,userMessage(error)).catch(()=>{});}
   });

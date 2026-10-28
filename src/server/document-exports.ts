@@ -1,7 +1,7 @@
 import {UserError} from './errors';
 import {savedAttempt,type UploadAttempt} from './uploads';
 
-export type ExportRequest={format:'txt'}|{format:'zip';pages:number[]};
+export type ExportRequest={format:'txt'}|{format:'markdown'}|{format:'zip';pages:number[]};
 export interface ExportReceipt {request:ExportRequest;attempt?:UploadAttempt;fileId?:string;url?:string;}
 export const MAX_DOCUMENT_EXPORTS=20;
 const invalid=()=>new UserError('export_selection','1~200쪽 중 최대 10쪽을 선택하세요. 예: 1,3-5,12');
@@ -22,6 +22,7 @@ export function normalizeExportRequest(value:unknown):ExportRequest{
   if(!value||typeof value!=='object')throw invalid();
   const request=value as Record<string,unknown>;
   if(request.format==='txt')return {format:'txt'};
+  if(request.format==='markdown')return {format:'markdown'};
   if(request.format!=='zip'||!Array.isArray(request.pages)||!request.pages.length||request.pages.length>200||request.pages.some(page=>!Number.isInteger(page)||page<1||page>200))throw invalid();
   const pages=[...new Set(request.pages as number[])].sort((a,b)=>a-b);
   if(pages.length>10)throw invalid();
@@ -29,11 +30,11 @@ export function normalizeExportRequest(value:unknown):ExportRequest{
 }
 export function exportKey(request:ExportRequest):string{
   const normalized=normalizeExportRequest(request);
-  return normalized.format==='txt'?'txt':'zip:'+normalized.pages.join(',');
+  return normalized.format==='txt'?'txt':normalized.format==='markdown'?'markdown-v2':'zip:'+normalized.pages.join(',');
 }
 export function exportName(name:string,request:ExportRequest):string{
   const base=name.replace(/\.(hwp|hwpx)$/i,'').replace(/[\u0000-\u001f\u007f/\\]/g,'').slice(0,140)||'document';
-  return request.format==='txt'?base+'.txt':base+'_PNG_'+request.pages.join('-')+'.zip';
+  return request.format==='txt'?base+'.txt':request.format==='markdown'?base+'_Markdown.zip':base+'_PNG_'+request.pages.join('-')+'.zip';
 }
 export function savedExports(exports:Record<string,ExportReceipt>|undefined):Record<string,ExportReceipt>|undefined{
   return exports?Object.fromEntries(Object.entries(exports).map(([key,receipt])=>[key,{request:normalizeExportRequest(receipt.request),fileId:receipt.fileId,url:receipt.url,attempt:receipt.attempt?savedAttempt(receipt.attempt):undefined}])):undefined;

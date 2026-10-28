@@ -81,13 +81,13 @@ await check('conversion_asset_integrity', async () => {
 });
 await check('document_exports_present', async () => {
   const conversion = await import(pathToFileURL(resolve('src/conversion/convert.mjs')).href);
-  requireValue(typeof conversion.convertMarkdown === 'function' && conversion.MAX_MARKDOWN_BYTES === 2 * 1024 * 1024);
+  requireValue(typeof conversion.convertMarkdown === 'function' && conversion.MAX_MARKDOWN_BYTES === 2 * 1024 * 1024 && typeof conversion.convertMarkdownPackage === 'function' && conversion.MAX_MARKDOWN_PACKAGE_BYTES === 50 * 1024 * 1024);
   requireValue(typeof conversion.convertText === 'function' && conversion.MAX_TEXT_BYTES === 2 * 1024 * 1024);
   requireValue(typeof conversion.convertPageZip === 'function' && typeof conversion.convertSelectedPageImages === 'function' && conversion.MAX_ZIP_BYTES === 26 * 1024 * 1024);
   // A valid manifest may still describe an older runtime without these modes.
   requireValue((await read('.cache/conversion/pdf-child.mjs')).includes('getTextFileUnicode'));
   const runtime = await read('.cache/conversion/runtime-child.mjs');
-  requireValue(['markdown', 'text', 'selected'].every(mode => runtime.includes(mode)));
+  requireValue(['markdown', 'markdown-package', 'text', 'selected'].every(mode => runtime.includes(mode)));
 });
 let freeMiB = null;
 try { const info = await statfs('.'); freeMiB = Math.floor(info.bavail * info.bsize / 1024 / 1024); } catch {}

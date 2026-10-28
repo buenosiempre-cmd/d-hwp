@@ -10,6 +10,11 @@ export function object(value: unknown): Record<string, unknown> {
 }
 export function userMessage(error: unknown): string {
   const messages:Record<string,string>={
+    conversion_markdown_limit:'문서 Markdown이 2 MiB 제한을 초과했습니다. 내용을 잘라서 제공하지 않았습니다. 원본 또는 PDF를 확인해 주세요.',
+    conversion_markdown_package_limit:'문서 Markdown 패키지 크기 제한을 초과했습니다. 원본과 PDF를 확인해 주세요.',
+    conversion_markdown_structure:'문서 구조를 안전하게 대조할 수 없습니다. 원본 또는 PDF를 확인해 주세요.',
+    conversion_archive_input:'문서의 압축 구조를 확인할 수 없거나 안전한 처리 한도를 초과했습니다.',
+    conversion_xml_input:'문서 XML 구조를 확인할 수 없거나 안전한 처리 한도를 초과했습니다.',
     conversion_page_selection:'선택한 쪽이 문서 범위를 벗어났거나 올바르지 않습니다. 실제 문서의 1~200쪽 중 최대 10쪽을 선택해 주세요.',
     conversion_text_limit:'추출한 TXT가 2 MiB 제한을 초과했습니다. 원본 또는 PDF에서 필요한 내용을 확인해 주세요.',
     conversion_text_empty:'추출할 텍스트가 없습니다. 그림 속 글자는 OCR하지 않으므로 원본 또는 PDF를 확인해 주세요.',
