@@ -31,7 +31,7 @@ try{
   active=true;
   void (async()=>{
    const {mode,start,end,bytes}=request;
-   if(!Buffer.isBuffer(bytes)||bytes.length>20*1024*1024||!['pdf','preview','images'].includes(mode)||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>10)throw new Error('request');
+   if(!Buffer.isBuffer(bytes)||bytes.length>20*1024*1024||!['pdf','preview','images','markdown'].includes(mode)||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>10)throw new Error('request');
    const workerStart=performance.now();metric('process_start','start');
    // Each thread gets new JS bindings, WASM instance/memory and copied assets. No SharedArrayBuffer.
    const worker=new Worker(resolve('.cache/conversion/pdf-child.mjs'),{execArgv:[],env:workerEnvironment(),stdout:true,stderr:true,resourceLimits:{maxOldGenerationSizeMb:512},workerData:{mode,start,end,bytes,module,fontManifest,fontBytes,print,browserWs}});
